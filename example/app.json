@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "Field Agent",
+    "slug": "expo-field-agent-example",
+    "version": "1.0.0",
+    "scheme": "fieldagent",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "android": {
+      "package": "tn.exemple.fieldagent",
+      "compileSdkVersion": 35,
+      "targetSdkVersion": 35,
+      "edgeToEdgeEnabled": true
+    },
+    "ios": {
+      "bundleIdentifier": "tn.exemple.fieldagent",
+      "supportsTablet": false
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
+      ],
+      [
+        "expo-field-agent",
+        {
+          "tracking": {
+            "url": "https://httpbin.org/post",
+            "batchUrl": "https://httpbin.org/post",
+            "intervalSeconds": 15,
+            "idleIntervalSeconds": 60,
+            "distanceFilterMeters": 15,
+            "batchSize": 50,
+            "queueSize": 1000,
+            "heartbeatSeconds": 120
+          },
+          "notification": {
+            "channelName": "Suivi en service",
+            "title": "En service",
+            "body": "Ta position est partagee pendant tes courses.",
+            "icon": "./assets/notif.png",
+            "color": "#FF6B2C"
+          },
+          "alert": {
+            "titlePattern": "Nouvelle course",
+            "sound": "./assets/alerte.wav",
+            "channelName": "Nouvelles courses",
+            "route": "field-agent-alert",
+            "ttlSeconds": 45,
+            "torch": true
+          },
+          "bubble": {
+            "icon": "./assets/bulle.png",
+            "label": "Suivi",
+            "colors": {
+              "ok": "#1DB954",
+              "warn": "#F5A623",
+              "bad": "#E5484D"
+            }
+          }
+        }
+      ]
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+build/
+plugin/build/
+android/build/
+android/.cxx/
+ios/build/
+*.tgz
+.DS_Store
+*.tsbuildinfo

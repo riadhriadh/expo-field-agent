@@ -1,0 +1,69 @@
+{
+  "name": "expo-field-agent",
+  "version": "1.0.0",
+  "description": "Suivi GPS en arriere-plan resilient, bulle flottante et alerte plein ecran pour applications Expo. Android complet, iOS avec capacites reduites assumees.",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "expo-module build",
+    "clean": "expo-module clean",
+    "lint": "expo-module lint",
+    "test": "expo-module test",
+    "prepare": "expo-module prepare",
+    "prepublishOnly": "expo-module prepublishOnly",
+    "expo-module": "expo-module"
+  },
+  "keywords": [
+    "expo",
+    "expo-config-plugin",
+    "react-native",
+    "android",
+    "background-location",
+    "background-geolocation",
+    "foreground-service",
+    "system-alert-window",
+    "chat-head",
+    "floating-bubble",
+    "full-screen-intent",
+    "alert",
+    "tracking"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riadhriadh/expo-field-agent.git"
+  },
+  "license": "MIT",
+  "files": [
+    "build",
+    "plugin/build",
+    "android/build.gradle",
+    "android/src",
+    "ios",
+    "app.plugin.js",
+    "expo-module.config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "expo": ">=52.0.0",
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "~18.3.12",
+    "expo": "^52.0.0",
+    "expo-module-scripts": "^4.0.4",
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "typescript": "^5.3.3"
+  },
+  "author": "Riadh Farhati (https://github.com/riadhriadh)",
+  "homepage": "https://github.com/riadhriadh/expo-field-agent#readme",
+  "bugs": {
+    "url": "https://github.com/riadhriadh/expo-field-agent/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

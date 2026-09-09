@@ -1,0 +1,47 @@
+apply plugin: 'com.android.library'
+
+group = 'expo.modules.fieldagent'
+version = '1.0.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+useExpoPublishing()
+
+android {
+  namespace "expo.modules.fieldagent"
+
+  defaultConfig {
+    // The alert activity, the overlay and the keystore-backed header all need
+    // API 23+; 24 is the Expo floor and what this module is tested against.
+    minSdkVersion Math.max(safeExtGet("minSdkVersion", 24) as int, 24)
+    versionCode 1
+    versionName "1.0.0"
+  }
+
+  testOptions {
+    // Geo and Queue are pure JVM; this keeps the android.* stubs they never
+    // touch from throwing instead of returning defaults.
+    unitTests.returnDefaultValues = true
+  }
+
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // AlertActivity extends ReactActivity so the full-screen alert can host the
+  // app's own root component. The version is substituted by the React Native
+  // gradle plugin already applied in the host project.
+  implementation "com.facebook.react:react-android"
+
+  // Already present in every Expo project that uses expo-location. Taken
+  // directly because LocationManager only exposes batching (maxUpdateDelay) and
+  // getCurrentLocation from API 30/31, and this module targets minSdk 24.
+  implementation "com.google.android.gms:play-services-location:21.3.0"
+
+  testImplementation "junit:junit:4.13.2"
+}

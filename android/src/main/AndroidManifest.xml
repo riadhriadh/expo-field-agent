@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Deliberately empty. Permissions, service, receivers and the alert
+       activity are declared by the config plugin into the host manifest, so a
+       host never has to touch native code and never fights a merge conflict
+       between two declarations of the same component. -->
+</manifest>

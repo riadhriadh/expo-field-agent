@@ -1,0 +1,11 @@
+<resources>
+  <!-- Opaque on purpose: the alert hosts the app's own root component, which
+       paints its own background. A translucent window here would show the
+       lock screen through it. -->
+  <style name="Theme.FieldAgent.Alert" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
+  </style>
+</resources>

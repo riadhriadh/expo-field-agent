@@ -1,0 +1,5 @@
+<resources>
+  <string name="field_agent_dismiss">Ignorer</string>
+  <string name="field_agent_channel_silent">%1$s (silencieux)</string>
+  <string name="field_agent_bubble_description">%1$s — appuyer pour ouvrir l\'application</string>
+</resources>
