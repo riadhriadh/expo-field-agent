@@ -22,7 +22,7 @@ tableau des limites est plus bas, écrit noir sur blanc.
 npx expo install expo-field-agent
 ```
 
-Puis dans `app.json` (toutes les clés sont optionnelles et ont un défaut sensé) :
+Puis dans `app.json` :
 
 ```json
 ["expo-field-agent", {
@@ -59,8 +59,59 @@ Puis dans `app.json` (toutes les clés sont optionnelles et ont un défaut sens�
 }]
 ```
 
-Une valeur absente ou malformée ne casse jamais le build : elle produit un
-avertissement lisible (`[expo-field-agent] …`) et le défaut s'applique.
+### Toutes les clés sont optionnelles · Every key is optional · كل المفاتيح اختيارية
+
+**FR** — Aucune clé n'est obligatoire et chacune a un défaut sensé.
+`["expo-field-agent"]`, sans le moindre objet d'options, fonctionne : le plugin
+s'installe en entier. Seule `tracking.url` ne peut pas avoir de défaut — donne-la
+ici, ou à chaud avec `start({ url })`. Une valeur absente ou malformée ne casse
+**jamais** le build : elle produit un avertissement lisible
+(`[expo-field-agent] …`) et le défaut s'applique.
+
+**EN** — No key is required, and every one of them has a sensible default.
+`["expo-field-agent"]` with no options object at all works: the plugin installs
+in full. Only `tracking.url` cannot have a default — give it here, or at runtime
+with `start({ url })`. A missing or malformed value **never** fails the build: it
+prints a readable warning (`[expo-field-agent] …`) and the default applies.
+
+**AR** — لا يوجد مفتاح إجباري، ولكل مفتاح قيمة افتراضية معقولة.
+`["expo-field-agent"]` بدون أي كائن خيارات يعمل: يُثبَّت الملحق بالكامل. وحده
+`tracking.url` لا يمكن أن تكون له قيمة افتراضية — مرّرها هنا، أو أثناء التشغيل
+عبر `start({ url })`. أي قيمة ناقصة أو غير صالحة **لا** تُفشل البناء أبدًا: يظهر
+تحذير مقروء (`[expo-field-agent] …`) وتُطبَّق القيمة الافتراضية.
+
+| Clé · Key · المفتاح | Défaut · Default · الافتراضي | Si tu l'omets · If omitted · إذا أُغفلت |
+| --- | --- | --- |
+| `tracking.url` | `null` | Le suivi refuse de démarrer · Tracking refuses to start · التتبّع يرفض أن يبدأ |
+| `tracking.batchUrl` | `null` | Envoi un par un sur `url` · Points go one by one to `url` · تُرسَل النقاط واحدة تلو الأخرى إلى `url` |
+| `tracking.intervalSeconds` | `15` | |
+| `tracking.idleIntervalSeconds` | `60` | |
+| `tracking.distanceFilterMeters` | `15` | |
+| `tracking.batchSize` | `50` | |
+| `tracking.queueSize` | `1000` | |
+| `tracking.heartbeatSeconds` | `max(idleIntervalSeconds × 2, 120)` | Soit `120` avec les défauts · So `120` with the defaults · أي `120` مع القيم الافتراضية |
+| `notification.channelName` | `"Suivi en service"` | |
+| `notification.title` | `"En service"` | |
+| `notification.body` | `"Ta position est partagee pendant tes courses."` | |
+| `notification.icon` | `null` | L'icône de l'application · The app icon · أيقونة التطبيق |
+| `notification.color` | `"#FF6B2C"` | |
+| `alert.titlePattern` | `".*"` | Tout titre déclenche · Every title fires · كل عنوان يُطلق التنبيه |
+| `alert.sound` | `null` | Sonnerie d'alarme du système · The system alarm ringtone · نغمة المنبّه في النظام |
+| `alert.channelName` | `"Nouvelles courses"` | |
+| `alert.route` | `"field-agent-alert"` | |
+| `alert.ttlSeconds` | `45` | |
+| `alert.torch` | `false` | |
+| `alert.channelVersion` | `1` | |
+| `bubble.icon` | `null` | Une pastille à la couleur de l'état · A dot in the state colour · نقطة بلون الحالة |
+| `bubble.label` | `"Suivi"` | |
+| `bubble.colors.ok` | `"#1DB954"` | |
+| `bubble.colors.warn` | `"#F5A623"` | |
+| `bubble.colors.bad` | `"#E5484D"` | |
+| `bubble.colors.urgent` | `"#E5484D"` | |
+| `ios.locationWhenInUsePermission` | `"Ta position sert a t'affecter les courses proches."` | |
+| `ios.locationAlwaysPermission` | `"Ta position continue a etre partagee pendant tes courses, meme application fermee."` | |
+| `ios.criticalAlerts` | `false` | Demande l'entitlement Apple · Needs Apple's entitlement · يتطلّب تصريح Apple |
+| `rootComponent` | `"main"` | Ce qu'enregistrent `registerRootComponent` et expo-router · What `registerRootComponent` and expo-router register · ما يسجّله `registerRootComponent` و expo-router |
 
 > **SDK 52 uniquement, et sans rapport avec ce module :** certaines versions
 > d'`expo-modules-core` embarquent un Compose Compiler qui refuse le Kotlin
