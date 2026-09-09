@@ -43,6 +43,8 @@
     "app.plugin.js",
     "expo-module.config.json",
     "README.md",
+    "README.fr.md",
+    "README.ar.md",
     "LICENSE"
   ],
   "peerDependencies": {
