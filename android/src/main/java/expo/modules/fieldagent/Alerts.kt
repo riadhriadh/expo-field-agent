@@ -476,9 +476,19 @@ object Alerts {
     }.getOrDefault(false)
 
     private fun raiseAlarmVolume(context: Context, audio: AudioManager) {
+        val config = Config.get(context).alert
+        // Opted out: the alert still rings on the alarm stream, just at whatever
+        // level the user chose. Nothing is saved, so nothing is restored later.
+        if (!config.forceVolume) return
+
         val preferences = Prefs.of(context)
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
         val current = audio.getStreamVolume(AudioManager.STREAM_ALARM)
+        val target = Volume.target(current, max, config.volumeLevel)
+
+        // Already loud enough. Writing anyway would save a "previous" value we
+        // would then restore over a level the user is happy with.
+        if (target <= current) return
 
         // Saved to disk, not to a field: a process killed mid-alert would
         // otherwise leave the user's alarm pinned at maximum forever.
@@ -486,10 +496,10 @@ object Alerts {
             preferences.edit().putInt(Prefs.SAVED_ALARM_VOLUME, current).commit()
         }
 
-        runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, max, 0) }
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, target, 0) }
         // The raise can be refused in silence (DND, manufacturer policy).
-        if (audio.getStreamVolume(AudioManager.STREAM_ALARM) < max) {
-            Bus.error("VOLUME", "Le volume d'alarme n'a pas pu etre monte au maximum.")
+        if (audio.getStreamVolume(AudioManager.STREAM_ALARM) < target) {
+            Bus.error("VOLUME", "Le volume d'alarme n'a pas pu etre monte au niveau demande.")
         }
     }
 

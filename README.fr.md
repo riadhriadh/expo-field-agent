@@ -152,6 +152,8 @@ prints a readable warning (`[expo-field-agent] …`) and the default applies.
 | `alert.route` | `"field-agent-alert"` | |
 | `alert.ttlSeconds` | `45` | |
 | `alert.torch` | `false` | |
+| `alert.forceVolume` | `true` | Le flux d'alarme est poussé pour l'alerte — le seul qu'Android joue encore en silencieux |
+| `alert.volumeLevel` | `1` | Poussé au maximum de l'appareil. Un plancher, jamais un plafond : qui a mis plus fort garde son niveau |
 | `alert.channelVersion` | `1` | |
 | `alert.notificationBridge` | `false` | Aucun écouteur de notifications déclaré — voir la section FCM pour savoir quand l'activer |
 | `bubble.icon` | `null` | Une pastille à la couleur de l'état · A dot in the state colour · نقطة بلون الحالة |
@@ -361,8 +363,17 @@ théorique.
    notification) sert de repli — pas l'inverse. Tu l'as embarqué exprès, et
    c'est le seul qui ne dépende pas d'une ROM. Chaque candidat est ouvert avant
    d'être retenu.
-5. **Sonner en silencieux** — flux `USAGE_ALARM` ; volume d'alarme poussé au
-   maximum, ancien volume **sauvé sur disque** (un process tué en pleine alerte
+5. **Sonner en silencieux** — flux `USAGE_ALARM`. **C'est ça, la réponse à
+   « qu'elle sonne même en silencieux » : le flux d'alarme est le seul
+   qu'Android continue de jouer en mode silencieux et en vibreur.** Monter le
+   flux de notification ou celui de la sonnerie ne changerait rien, et c'est
+   pour ça que ni l'un ni l'autre n'est touché. Jusqu'où on pousse, c'est
+   `alert.volumeLevel` (0 à 1 du maximum de l'appareil, `1` par défaut), et
+   `alert.forceVolume: false` supprime la montée pour un hôte qui préfère
+   respecter le niveau choisi par l'utilisateur. La montée est un **plancher,
+   jamais un plafond** — qui garde déjà son alarme plus fort la garde, et aucune
+   valeur précédente n'est enregistrée dans ce cas. L'ancien volume est **sauvé
+   sur disque** (un process tué en pleine alerte
    laisserait sinon le réveil bloqué au max) et restauré au démarrage suivant ;
    le volume est relu après écriture, et une montée refusée en silence produit
    un `error` de code `VOLUME`. Focus audio

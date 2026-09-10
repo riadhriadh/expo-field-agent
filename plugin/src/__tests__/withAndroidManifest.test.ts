@@ -1,6 +1,6 @@
 import { AndroidConfig } from 'expo/config-plugins';
 
-import { META_CONFIG, resolveProps } from '../props';
+import { META_CONFIG, resolveProps, serializeForNative } from '../props';
 import { applyManifest } from '../withAndroidManifest';
 
 type Manifest = AndroidConfig.Manifest.AndroidManifest;
@@ -39,6 +39,53 @@ describe('applyManifest', () => {
     ]) {
       expect(declared).toContain(permission);
     }
+  });
+
+  it('forces the alarm volume to the device maximum by default', () => {
+    // An alert nobody hears is not an alert: the default has to be loud.
+    expect(props.alert.forceVolume).toBe(true);
+    expect(props.alert.volumeLevel).toBe(1);
+  });
+
+  it('clamps a volume level outside 0..1 instead of trusting it', () => {
+    const loud = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions' }, alert: { volumeLevel: 7 } },
+      __dirname
+    );
+    expect(loud.alert.volumeLevel).toBe(1);
+
+    const negative = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions' }, alert: { volumeLevel: -2 } },
+      __dirname
+    );
+    expect(negative.alert.volumeLevel).toBe(0);
+  });
+
+  it('keeps a partial volume level as given', () => {
+    const half = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions' }, alert: { volumeLevel: 0.6 } },
+      __dirname
+    );
+    expect(half.alert.volumeLevel).toBe(0.6);
+    expect(half.alert.forceVolume).toBe(true);
+  });
+
+  it('lets the host opt out of touching the volume at all', () => {
+    const quiet = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions' }, alert: { forceVolume: false } },
+      __dirname
+    );
+    expect(quiet.alert.forceVolume).toBe(false);
+  });
+
+  it('carries both volume keys through to the native config blob', () => {
+    const half = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions' }, alert: { volumeLevel: 0.5 } },
+      __dirname
+    );
+    const blob = JSON.parse(serializeForNative(half, null));
+    expect(blob.alert.forceVolume).toBe(true);
+    expect(blob.alert.volumeLevel).toBe(0.5);
   });
 
   it('leaves the notification listener out unless the host asked for it', () => {

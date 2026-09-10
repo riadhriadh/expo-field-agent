@@ -32,6 +32,10 @@ data class AlertConfig(
     val route: String,
     val ttlSeconds: Int,
     val torch: Boolean,
+    /** Push the alarm stream up for the alert; the only stream that still plays on silent. */
+    val forceVolume: Boolean,
+    /** Share of the device maximum to guarantee, 0..1. A floor, never a ceiling. */
+    val volumeLevel: Double,
     /** Opt-in notification listener; see NotificationBridge for why it is off by default. */
     val notificationBridge: Boolean,
     val channelVersion: Int
@@ -150,6 +154,8 @@ object Config {
                 route = alert.str("route", "field-agent-alert")!!,
                 ttlSeconds = alert.optInt("ttlSeconds", 45).coerceIn(1, 600),
                 torch = alert.optBoolean("torch", false),
+                forceVolume = alert.optBoolean("forceVolume", true),
+                volumeLevel = alert.optDouble("volumeLevel", 1.0),
                 notificationBridge = alert.optBoolean("notificationBridge", false),
                 channelVersion = alert.optInt("channelVersion", 1).coerceAtLeast(1)
             ),

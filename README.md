@@ -142,6 +142,8 @@ afternoon.
 | `alert.route` | `"field-agent-alert"` | |
 | `alert.ttlSeconds` | `45` | |
 | `alert.torch` | `false` | |
+| `alert.forceVolume` | `true` | The alarm stream is pushed up for the alert — the only stream Android still plays on silent |
+| `alert.volumeLevel` | `1` | Pushed to the device maximum. A floor, never a ceiling: a louder user keeps their level |
 | `alert.channelVersion` | `1` | |
 | `alert.notificationBridge` | `false` | No notification listener is declared — see the FCM section for when to turn it on |
 | `bubble.icon` | `null` | A dot in the state colour |
@@ -353,8 +355,15 @@ Every point below is a production bug, not a theoretical best practice.
    fallback — not the other way round. You bundled it on purpose, and it is the
    only one that does not depend on a ROM. Each candidate is opened before being
    kept.
-5. **Ringing while silenced** — the `USAGE_ALARM` stream; alarm volume raised to
-   maximum, the old volume **saved to disk** (a process killed mid-alert would
+5. **Ringing while silenced** — the `USAGE_ALARM` stream. **This is the answer to
+   "make it ring even on silent": the alarm stream is the only one Android keeps
+   playing in silent and vibrate mode.** Raising the notification or the ring
+   stream instead would change nothing, which is why neither is touched. How far
+   it is pushed is `alert.volumeLevel` (0 to 1 of the device maximum, `1` by
+   default), and `alert.forceVolume: false` turns the push off entirely for a
+   host that would rather respect the user's own level. The raise is a **floor,
+   never a ceiling** — someone who already keeps their alarm louder keeps it, and
+   no previous value is recorded in that case. The old volume is **saved to disk** (a process killed mid-alert would
    otherwise leave the morning alarm pinned at maximum) and restored on the next
    start; the volume is read back after writing, and a silently refused raise
    produces an `error` with code `VOLUME`. Audio focus

@@ -45,6 +45,18 @@ export type AlertProps = {
   route?: string;
   ttlSeconds?: number;
   torch?: boolean;
+  /**
+   * Push the alarm stream up for the duration of an alert. On by default,
+   * because the alarm stream is the only one Android still plays when the phone
+   * is on silent — and an alert nobody hears is not an alert.
+   */
+  forceVolume?: boolean;
+  /**
+   * Share of the device maximum to guarantee while an alert rings, 0 to 1.
+   * It is a floor, never a ceiling: someone who already keeps their alarm
+   * louder keeps it. Ignored when `forceVolume` is false.
+   */
+  volumeLevel?: number;
   /** Bump this when channel attributes must be re-created on already-installed devices. */
   channelVersion?: number;
   /**
@@ -108,6 +120,8 @@ export type ResolvedProps = {
     route: string;
     ttlSeconds: number;
     torch: boolean;
+    forceVolume: boolean;
+    volumeLevel: number;
     channelVersion: number;
     notificationBridge: boolean;
   };
@@ -178,6 +192,21 @@ function notificationBridge(value: unknown): boolean {
     );
   }
   return enabled;
+}
+
+/** 0..1, because it is multiplied by the device's own maximum. */
+function ratio(value: unknown, fallback: number, key: string): number {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    warn(key + ' doit etre un nombre entre 0 et 1 — defaut ' + fallback + ' utilise.');
+    return fallback;
+  }
+  if (value < 0 || value > 1) {
+    const clamped = Math.min(1, Math.max(0, value));
+    warn(key + ' doit valoir entre 0 et 1, recu ' + value + ' — ramene a ' + clamped + '.');
+    return clamped;
+  }
+  return value;
 }
 
 function color(value: unknown, fallback: string, key: string): string {
@@ -271,6 +300,15 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
     titlePattern = '.*';
   }
 
+  const forceVolume = bool(alert.forceVolume, true, 'alert.forceVolume');
+  const volumeLevel = ratio(alert.volumeLevel, 1, 'alert.volumeLevel');
+  if (!forceVolume && alert.volumeLevel !== undefined) {
+    warn('alert.volumeLevel est ignore tant que alert.forceVolume vaut false.');
+  }
+  if (forceVolume && volumeLevel === 0) {
+    warn('alert.volumeLevel a 0 revient a desactiver la montee : mets plutot alert.forceVolume a false.');
+  }
+
   return {
     tracking: {
       url: trackingUrl,
@@ -301,6 +339,8 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
       route: str(alert.route, 'field-agent-alert', 'alert.route'),
       ttlSeconds: num(alert.ttlSeconds, 45, 'alert.ttlSeconds', 1),
       torch: bool(alert.torch, false, 'alert.torch'),
+      forceVolume,
+      volumeLevel,
       channelVersion: num(alert.channelVersion, 1, 'alert.channelVersion', 1),
       notificationBridge: notificationBridge(alert.notificationBridge),
     },
