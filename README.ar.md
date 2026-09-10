@@ -447,8 +447,43 @@ TaskManager.defineTask(TASK, ({ data, error }) => {
 Notifications.registerTaskAsync(TASK);
 ```
 
-أرسل رسالة **data-only** (بلا كتلة `notification`)، وإلّا عرض أندرويد إشعاره
-الخاص فوق إشعارك والتطبيق مغلق.
+### يجب أن تكون الرسالة data-only — وهذه ليست تفصيلة
+
+حين تحمل رسالة FCM كتلة `notification` ولا يكون تطبيقك في المقدّمة، فإنّ SDK
+الخاص بـ Firebase ينشر ذلك الإشعار في شريط النظام **بنفسه** ولا يستدعي كودك
+إطلاقًا. لا `onMessageReceived`، ولا مهمّة خلفية، ولا `triggerAlert()`، ولا شاشة
+كاملة. وكتابة `FirebaseMessagingService` خاص بك لا تغيّر شيئًا: الـ SDK يقصر
+الطريق قبل أي خدمة يمكنك تسجيلها. هذه هي الحالة الوحيدة التي لا يصلحها أي كود
+من جهة العميل — الإصلاح عند المُرسِل، وهو مفتاح واحد.
+
+```json
+{
+  "message": {
+    "token": "<device token>",
+    "android": { "priority": "HIGH" },
+    "data": {
+      "title": "Nouvelle course",
+      "body": "3,2 km - 12 DT",
+      "jobId": "1234"
+    }
+  }
+}
+```
+
+لا `notification` في أي موضع — لا `message.notification` ولا
+`message.android.notification`. وكل قيم `data` يجب أن تكون نصوصًا: هذا قيد من
+FCM لا منّا.
+
+**إن كنت ترسل عبر خدمة push من Expo (‏`exp.host`) بدل FCM مباشرةً فالأمر
+مُعالَج أصلًا:** ‏Expo يرسل data-only داخليًا و`expo-notifications` يعرض الإشعار
+بنفسه، فتعمل المهمّة الخلفية ويُبلَغ `triggerAlert()`. الفخّ لا يعضّ إلّا حين
+تخاطب FCM مباشرةً.
+
+**«الإيقاف القسري» ليس «التطبيق مغلق».** التطبيق الذي أوقفه المستخدم قسرًا من
+إعدادات النظام لا يستقبل أي رسالة FCM ولا أي broadcast إطلاقًا حتى يُشغّله بيده
+من جديد. تلك هي حالة *stopped* في أندرويد، ولا شيء يُخرجه منها — لا push، ولا
+`BOOT_COMPLETED`، ولا المراقب. وفي كل هذا الملف، «التطبيق مغلق» تعني مُزاحًا من
+التطبيقات الحديثة أو مقتولًا من النظام، لا موقوفًا قسرًا.
 
 من هناك يتولّى الجانب الأصلي: قناة `IMPORTANCE_HIGH`، و`setFullScreenIntent`،
 و`AlertActivity` فوق شاشة القفل، والرنين على مسار المنبّه، ومكوّن `AlertHost`
@@ -503,7 +538,7 @@ Notifications.registerTaskAsync(TASK);
 | ٧ | صامت + صوت المنبّه على ١ + تنبيه | `adb shell media volume --stream 4 --set 1` ثم تنبيه، و`adb shell dumpsys audio \| grep -A3 STREAM_ALARM` | ارتفع الصوت إلى أقصاه أثناء التنبيه واستُعيد بعده؛ و`dumpsys media.audio_flinger` يُظهر مسار `USAGE_ALARM` نشطًا |
 | ٨ | «عدم الإزعاج» مفعَّل + تنبيه | فعّل عدم الإزعاج، ثم `getPermissions().dndAccess` | يرنّ إذا كان `granted`؛ وإلّا فالحالة تقولها بوضوح وهذا الملف يشرح ما العمل |
 | ٩ | كتم من جهة التطبيق + تنبيه | `setAlertSound(false)` ثم تنبيه | لا مشغّل صوت، و**لا** رفع لمستوى الصوت (`dumpsys audio` دون تغيير)، والشاشة تُفتح رغم ذلك |
-| ١٠ | تنبيه والتطبيق مغلق | `adb shell am force-stop tn.exemple.fieldagent`، ثم تنبيه عبر ردّ الخادم أو مهمّة push | تُفتح الشاشة وتعرض مكوّن التطبيق بالبيانات الصحيحة |
+| ١٠ | تنبيه والتطبيق مغلق | أزِح التطبيق من التطبيقات الحديثة (أو `adb shell am kill tn.exemple.fieldagent`)، ثم تنبيه عبر ردّ الخادم أو مهمّة push. **وليس** `am force-stop`: التطبيق الموقوف قسرًا لا يستقبل شيئًا حتى يُشغَّل يدويًا | تُفتح الشاشة وتعرض مكوّن التطبيق بالبيانات الصحيحة |
 | ١١ | الفقاعة: سحب، التصاق بالحافّة، نقر | يدويًا + `adb shell dumpsys window \| grep fieldagent` | وصل حدث `bubblePress`؛ والموضع محفوظ بعد `am crash` |
 | ١٢ | ٨ ساعات تتبّع متواصل | `adb shell dumpsys meminfo tn.exemple.fieldagent` كل ساعة؛ و`adb shell dumpsys batterystats --charged tn.exemple.fieldagent` | `TOTAL PSS` مستقرّ؛ راجع «الحدود المقبولة» بخصوص الاستهلاك |
 

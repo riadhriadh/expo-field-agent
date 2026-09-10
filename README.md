@@ -460,8 +460,46 @@ TaskManager.defineTask(TASK, ({ data, error }) => {
 Notifications.registerTaskAsync(TASK);
 ```
 
-Send a **data-only** message (no `notification` block), otherwise Android shows
-its own notification on top of yours while the app is closed.
+### The message must be data-only — this is not a detail
+
+When an FCM message carries a `notification` block and your app is not in the
+foreground, the Firebase SDK posts that notification to the system tray
+**itself** and never calls into your app. No `onMessageReceived`, no background
+task, no `triggerAlert()`, no full-screen screen. Writing your own
+`FirebaseMessagingService` does not change this: the SDK short-circuits before
+any service you could possibly register. This is the one case that no amount of
+client-side code fixes — the fix is on the sender, and it is a single key.
+
+```json
+{
+  "message": {
+    "token": "<device token>",
+    "android": { "priority": "HIGH" },
+    "data": {
+      "title": "Nouvelle course",
+      "body": "3,2 km - 12 DT",
+      "jobId": "1234"
+    }
+  }
+}
+```
+
+No `notification` key anywhere — neither `message.notification` nor
+`message.android.notification`. Every `data` value must be a string; that is an
+FCM constraint, not ours.
+
+**If you send through Expo's push service (`exp.host`) rather than raw FCM, this
+is already handled for you:** Expo sends data-only under the hood and
+`expo-notifications` renders the notification itself, so the background task
+runs and `triggerAlert()` is reached. The trap only bites when you talk to FCM
+directly.
+
+**"Force stop" is not the same as "app closed".** An app the user force-stopped
+from system settings receives no FCM message and no broadcast at all until they
+launch it again by hand. That is Android's *stopped* state, and nothing brings
+it back — not a push, not `BOOT_COMPLETED`, not the watchdog. Everywhere in this
+README, "app closed" means swiped from recents or killed by the system, never
+force-stopped.
 
 From there native takes over: an `IMPORTANCE_HIGH` channel,
 `setFullScreenIntent`, `AlertActivity` over the lock screen, the ring on the
@@ -516,7 +554,7 @@ plain string or regex). Three sources reach it:
 | 7 | Silent + alarm volume at 1 + alert | `adb shell media volume --stream 4 --set 1` then an alert, and `adb shell dumpsys audio \| grep -A3 STREAM_ALARM` | volume raised to maximum during the alert, restored afterwards; `dumpsys media.audio_flinger` shows an active `USAGE_ALARM` stream |
 | 8 | Do Not Disturb on + alert | enable DND, `getPermissions().dndAccess` | rings if `granted`; otherwise the state says so plainly and this README explains what to do |
 | 9 | Host-side mute + alert | `setAlertSound(false)` then an alert | no player, **no** volume raise (`dumpsys audio` unchanged), the screen still opens |
-| 10 | Alert with the app closed | `adb shell am force-stop tn.exemple.fieldagent`, then an alert via the server response or a push task | the screen opens and renders the host's component with the right data |
+| 10 | Alert with the app closed | swipe the app from recents (or `adb shell am kill tn.exemple.fieldagent`), then an alert via the server response or a push task. **Not** `am force-stop`: a force-stopped app receives nothing until it is launched by hand | the screen opens and renders the host's component with the right data |
 | 11 | Bubble: drag, snap, tap | manual + `adb shell dumpsys window \| grep fieldagent` | `bubblePress` event received; position kept after `am crash` |
 | 12 | 8 h of continuous tracking | `adb shell dumpsys meminfo tn.exemple.fieldagent` hourly; `adb shell dumpsys batterystats --charged tn.exemple.fieldagent` | `TOTAL PSS` stable; see "assumed limits" for consumption |
 

@@ -467,9 +467,46 @@ TaskManager.defineTask(TACHE, ({ data, error }) => {
 Notifications.registerTaskAsync(TACHE);
 ```
 
-Envoie un message **data-only** (pas de bloc `notification`), sinon Android
-affiche sa propre notification en plus de la tienne quand l'application est
-fermée.
+### Le message doit être data-only — ce n'est pas un détail
+
+Quand un message FCM porte un bloc `notification` et que ton application n'est
+pas au premier plan, le SDK Firebase pose cette notification dans la barre
+système **lui-même** et n'appelle jamais ton code. Pas de `onMessageReceived`,
+pas de tâche de fond, pas de `triggerAlert()`, pas d'écran plein. Écrire ton
+propre `FirebaseMessagingService` n'y change rien : le SDK court-circuite avant
+tout service que tu pourrais enregistrer. C'est le seul cas qu'aucun code côté
+client ne rattrape — le correctif est chez l'émetteur, et c'est une seule clé.
+
+```json
+{
+  "message": {
+    "token": "<device token>",
+    "android": { "priority": "HIGH" },
+    "data": {
+      "title": "Nouvelle course",
+      "body": "3,2 km - 12 DT",
+      "jobId": "1234"
+    }
+  }
+}
+```
+
+Aucun `notification` nulle part — ni `message.notification`, ni
+`message.android.notification`. Et toutes les valeurs de `data` doivent être des
+chaînes : c'est une contrainte de FCM, pas la nôtre.
+
+**Si tu passes par le service push d'Expo (`exp.host`) plutôt que par FCM
+directement, c'est déjà réglé :** Expo envoie du data-only en interne et
+`expo-notifications` affiche la notification lui-même, donc la tâche de fond
+tourne et `triggerAlert()` est atteint. Le piège ne mord que quand tu parles à
+FCM directement.
+
+**« Forcer l'arrêt » n'est pas « application fermée ».** Une application que
+l'utilisateur a arrêtée de force depuis les réglages système ne reçoit plus
+aucun message FCM ni aucun broadcast tant qu'il ne la relance pas à la main.
+C'est l'état *stopped* d'Android, et rien ne l'en sort — ni un push, ni
+`BOOT_COMPLETED`, ni le watchdog. Partout dans ce README, « application fermée »
+veut dire balayée des récents ou tuée par le système, jamais arrêtée de force.
 
 À partir de là c'est le natif qui prend : canal `IMPORTANCE_HIGH`,
 `setFullScreenIntent`, `AlertActivity` par-dessus l'écran verrouillé, sonnerie
@@ -526,7 +563,7 @@ d'entrée unique, `triggerAlert()`, filtré par `alert.titlePattern`
 | 7 | Silencieux + volume alarme à 1 + alerte | `adb shell media volume --stream 4 --set 1` puis alerte, et `adb shell dumpsys audio \| grep -A3 STREAM_ALARM` | volume monté au max pendant l'alerte, restauré après ; `dumpsys media.audio_flinger` montre un flux `USAGE_ALARM` actif |
 | 8 | « Ne pas déranger » actif + alerte | activer DND, `getPermissions().dndAccess` | sonne si `granted` ; sinon l'état le dit clairement et le README explique quoi faire |
 | 9 | Son coupé côté hôte + alerte | `setAlertSound(false)` puis alerte | aucun lecteur, **aucune** montée de volume (`dumpsys audio` inchangé), l'écran s'ouvre quand même |
-| 10 | Alerte application fermée | `adb shell am force-stop tn.exemple.fieldagent`, puis alerte via la réponse serveur ou une tâche push | l'écran s'ouvre et affiche le composant de l'hôte avec les bonnes données |
+| 10 | Alerte application fermée | balayer l'app des récents (ou `adb shell am kill tn.exemple.fieldagent`), puis alerte via la réponse serveur ou une tâche push. **Pas** `am force-stop` : une application arrêtée de force ne reçoit plus rien tant qu'on ne la relance pas à la main | l'écran s'ouvre et affiche le composant de l'hôte avec les bonnes données |
 | 11 | Bulle : glisser, coller au bord, taper | manuel + `adb shell dumpsys window \| grep fieldagent` | événement `bubblePress` reçu ; position conservée après `am crash` |
 | 12 | 8 h de suivi continu | `adb shell dumpsys meminfo tn.exemple.fieldagent` toutes les heures ; `adb shell dumpsys batterystats --charged tn.exemple.fieldagent` | `TOTAL PSS` stable ; voir « limites assumées » pour la consommation |
 
