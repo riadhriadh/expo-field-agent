@@ -47,6 +47,13 @@ export type AlertProps = {
   torch?: boolean;
   /** Bump this when channel attributes must be re-created on already-installed devices. */
   channelVersion?: number;
+  /**
+   * Declares a NotificationListenerService, the only way to catch an FCM
+   * message that carries a `notification` block while the app is backgrounded.
+   * Off by default: the permission draws a Play review, and shipping data-only
+   * messages fixes the same problem on the sender for free. See README.
+   */
+  notificationBridge?: boolean;
 };
 
 export type BubbleProps = {
@@ -102,6 +109,7 @@ export type ResolvedProps = {
     ttlSeconds: number;
     torch: boolean;
     channelVersion: number;
+    notificationBridge: boolean;
   };
   bubble: {
     icon: string | null;
@@ -154,6 +162,22 @@ function bool(value: unknown, fallback: boolean, key: string): boolean {
     return fallback;
   }
   return value;
+}
+
+/**
+ * Turning the bridge on adds BIND_NOTIFICATION_LISTENER_SERVICE to the app.
+ * Google Play reviews every app that carries it, so the developer has to see a
+ * line about it in their own build output — silence here would be a trap.
+ */
+function notificationBridge(value: unknown): boolean {
+  const enabled = bool(value, false, 'alert.notificationBridge');
+  if (enabled) {
+    warn(
+      'alert.notificationBridge active un NotificationListenerService : Google Play examine ' +
+        'toute application qui le declare. Un message FCM data-only resout le meme probleme sans lui.'
+    );
+  }
+  return enabled;
 }
 
 function color(value: unknown, fallback: string, key: string): string {
@@ -278,6 +302,7 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
       ttlSeconds: num(alert.ttlSeconds, 45, 'alert.ttlSeconds', 1),
       torch: bool(alert.torch, false, 'alert.torch'),
       channelVersion: num(alert.channelVersion, 1, 'alert.channelVersion', 1),
+      notificationBridge: notificationBridge(alert.notificationBridge),
     },
     bubble: {
       icon: asset(bubble.icon, 'bubble.icon', projectRoot, ['png']),

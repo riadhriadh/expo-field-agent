@@ -144,6 +144,9 @@ Passer de `OFFLINE` à `IDLE` **ne doit jamais** être possible sans que
    - `autostart` sur Xiaomi / Oppo / Vivo / Huawei → **bloquant**. Explique que
      sans lui le service ne revient pas après un nettoyage système.
    - `batteryUnrestricted` → `openSettings('batteryUnrestricted')` uniquement.
+   - `notificationAccess` → n'apparaît que si tu as mis `alert.notificationBridge: true`
+     (uniquement quand tu ne contrôles pas l'émetteur du push). Sinon la clé rend
+     `unsupported` et la ligne ne doit pas s'afficher.
 
 3. **Accueil / carte** — la carte, le point du chauffeur alimenté par
    l'événement `position`, un gros interrupteur **En ligne / Hors ligne**, les
@@ -267,7 +270,7 @@ conception de l'application.
 |---|---|
 | `getPermissions()` | Onboarding au montage, et à chaque `AppState` → `active` |
 | `requestPermissions({ skip })` | Bouton « Tout autoriser ». `skip: ['dndAccess']` si le chauffeur a déjà refusé une fois |
-| `openSettings(nom)` | Chaque ligne refusée de l'onboarding ; obligatoire pour `autostart` et `batteryUnrestricted` |
+| `openSettings(nom)` | Chaque ligne refusée de l'onboarding ; obligatoire pour `autostart` et `batteryUnrestricted`, et pour `notificationAccess` si le pont est activé |
 | `start(options?)` | Bouton « Passer en ligne ». Passe `{ intervalSeconds: 20 }` et, en recette, `{ url }` pour viser le serveur de test |
 | `stop()` | « Passer hors ligne ». Confirmation si une course est en cours |
 | `isRunning()` | Au démarrage de l'application, pour reconstruire l'état après un kill |

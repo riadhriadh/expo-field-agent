@@ -102,6 +102,27 @@ export function applyManifest(
     $: { 'android:name': `${PKG}.AlertActionReceiver`, 'android:exported': 'false' },
   });
 
+  // Only when asked for. Declaring a notification listener the host did not
+  // request would put their release through a Play review they never signed up
+  // for, over a feature they are not using.
+  if (props.alert.notificationBridge) {
+    upsert(application, 'service', {
+      $: {
+        'android:name': `${PKG}.NotificationBridge`,
+        'android:label': '@string/field_agent_bridge_label',
+        // The system binds it from outside the app, so it is exported — and the
+        // BIND permission is what keeps anything else from binding it.
+        'android:exported': 'true',
+        'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
+      },
+      'intent-filter': [
+        {
+          action: [{ $: { 'android:name': 'android.service.notification.NotificationListenerService' } }],
+        },
+      ],
+    } as unknown as Node);
+  }
+
   upsert(application, 'activity', {
     $: {
       'android:name': `${PKG}.AlertActivity`,

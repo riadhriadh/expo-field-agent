@@ -153,6 +153,7 @@ prints a readable warning (`[expo-field-agent] …`) and the default applies.
 | `alert.ttlSeconds` | `45` | |
 | `alert.torch` | `false` | |
 | `alert.channelVersion` | `1` | |
+| `alert.notificationBridge` | `false` | Aucun écouteur de notifications déclaré — voir la section FCM pour savoir quand l'activer |
 | `bubble.icon` | `null` | Une pastille à la couleur de l'état · A dot in the state colour · نقطة بلون الحالة |
 | `bubble.label` | `"Suivi"` | |
 | `bubble.colors.ok` | `"#1DB954"` | |
@@ -268,7 +269,7 @@ FieldAgent.getPendingAlertSync(): AlertPayload | null;
 FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', cb): Subscription;
 ```
 
-`Permissions` porte huit clés :
+`Permissions` porte neuf clés :
 
 | clé | ce que c'est |
 |---|---|
@@ -279,6 +280,7 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 | `batteryUnrestricted` | liste système d'optimisation de batterie |
 | `dndAccess` | `ACCESS_NOTIFICATION_POLICY` |
 | `fullScreenIntent` | **ajout** — Android 14 place `setFullScreenIntent` derrière un accès spécial. Sans lui l'alerte au verrouillage retombe silencieusement en notification classique, donc l'état est visible plutôt que supposé. |
+| `notificationAccess` | **ajout** — l'écran système d'accès aux notifications, utile uniquement au `alert.notificationBridge` optionnel. `unsupported` tant que le pont n'est pas activé. |
 | `autostart` | **ajout** — l'écran de démarrage automatique du constructeur. Aucune API ne le lit : `granted` une fois que l'utilisateur y est passé, `undetermined` avant, `unsupported` sur une marque sans écran connu. |
 
 Deux clés en plus du contrat d'origine, parce que sans elles l'alerte et le
@@ -467,20 +469,32 @@ TaskManager.defineTask(TACHE, ({ data, error }) => {
 Notifications.registerTaskAsync(TACHE);
 ```
 
-### Le message doit être data-only — ce n'est pas un détail
+### Tous les chemins d'arrivée, et ce qui se passe vraiment
+
+| Comment l'alerte arrive | Écran plein ? |
+|---|---|
+| La réponse de ton serveur sur `POST /positions` | ✅ ne demande aucun push — c'est le service qui a fait la requête |
+| FCM **data-only**, app ouverte ou en arrière-plan | ✅ par `addNotificationReceivedListener` → `triggerAlert()` |
+| FCM **data-only**, app tuée | ✅ par une tâche headless `expo-task-manager` → `triggerAlert()` |
+| FCM **avec un bloc `notification`**, app en arrière-plan ou tuée | ✅ **uniquement** avec `alert.notificationBridge: true` — sinon ❌ |
+| App arrêtée de force depuis les réglages | ❌ plus rien ne l'atteint, jamais. Aucune application ne peut corriger ça |
+| iOS, quel que soit le chemin | ❌ l'écran plein n'existe pas. Notification `.timeSensitive`, `.critical` avec l'entitlement Apple |
+
+### Le message devrait être data-only — et pourquoi aucun code client ne rattrape
 
 Quand un message FCM porte un bloc `notification` et que ton application n'est
 pas au premier plan, le SDK Firebase pose cette notification dans la barre
 système **lui-même** et n'appelle jamais ton code. Pas de `onMessageReceived`,
-pas de tâche de fond, pas de `triggerAlert()`, pas d'écran plein. Écrire ton
-propre `FirebaseMessagingService` n'y change rien : le SDK court-circuite avant
-tout service que tu pourrais enregistrer. C'est le seul cas qu'aucun code côté
-client ne rattrape — le correctif est chez l'émetteur, et c'est une seule clé.
+pas de tâche de fond, pas de `triggerAlert()`. Écrire ton propre
+`FirebaseMessagingService` n'y change rien : le SDK court-circuite avant tout
+service que tu pourrais enregistrer.
+
+Le correctif gratuit est chez l'émetteur, et c'est une seule clé :
 
 ```json
 {
   "message": {
-    "token": "<device token>",
+    "token": "<jeton de l'appareil>",
     "android": { "priority": "HIGH" },
     "data": {
       "title": "Nouvelle course",
@@ -498,27 +512,46 @@ chaînes : c'est une contrainte de FCM, pas la nôtre.
 **Si tu passes par le service push d'Expo (`exp.host`) plutôt que par FCM
 directement, c'est déjà réglé :** Expo envoie du data-only en interne et
 `expo-notifications` affiche la notification lui-même, donc la tâche de fond
-tourne et `triggerAlert()` est atteint. Le piège ne mord que quand tu parles à
-FCM directement.
+tourne. Le piège ne mord que quand tu parles à FCM directement.
 
-**« Forcer l'arrêt » n'est pas « application fermée ».** Une application que
-l'utilisateur a arrêtée de force depuis les réglages système ne reçoit plus
-aucun message FCM ni aucun broadcast tant qu'il ne la relance pas à la main.
-C'est l'état *stopped* d'Android, et rien ne l'en sort — ni un push, ni
-`BOOT_COMPLETED`, ni le watchdog. Partout dans ce README, « application fermée »
-veut dire balayée des récents ou tuée par le système, jamais arrêtée de force.
+### `alert.notificationBridge` — quand tu ne contrôles pas l'émetteur
 
-À partir de là c'est le natif qui prend : canal `IMPORTANCE_HIGH`,
-`setFullScreenIntent`, `AlertActivity` par-dessus l'écran verrouillé, sonnerie
-sur le flux d'alarme, et ton composant `AlertHost` rendu au premier frame.
+Si le push vient d'un système que tu ne peux pas changer, il reste une voie : un
+`NotificationListenerService`. Il voit la notification *après* qu'Android l'a
+posée, et c'est le seul point d'observation qui reste une fois que le SDK
+Firebase a contourné ton application.
 
-**Ce que le plugin ne fait pas :** il n'installe pas son propre
-`FirebaseMessagingService`. Un seul service peut gagner le filtre
-`MESSAGING_EVENT`, et le prendre casserait `expo-notifications` dans ton
-application. Les deux branchements ci-dessus passent par lui, donc rien n'est
-volé à personne. Si tu veux quand même l'entrée FCM native (un cas : tu n'as pas
-`expo-notifications` du tout), demande — c'est une dépendance `firebase-messaging`
-et un couplage de version en plus, pas un défaut de choix par défaut.
+```json
+"alert": { "notificationBridge": true }
+```
+
+Ce qu'il fait : il lit **uniquement les notifications de ton propre paquet**, les
+confronte à `alert.titlePattern` exactement comme n'importe quelle autre source,
+déclenche l'alerte plein écran, et annule la copie de la barre système qu'il
+vient de remplacer pour que l'utilisateur ne voie pas deux fois le même
+événement. Sa propre notification d'alerte est exclue par identifiant, sans quoi
+il se redéclencherait indéfiniment.
+
+Ce qu'il coûte, et c'est à peser avant de l'activer :
+
+- Il ajoute `BIND_NOTIFICATION_LISTENER_SERVICE` à ton manifeste. **Google Play
+  examine toute application qui le porte** et attend que l'accès aux
+  notifications soit une fonctionnalité centrale. Le plugin affiche un
+  avertissement à la compilation pour que ce ne soit jamais une surprise
+  découverte au moment de publier.
+- L'utilisateur doit accorder l'accès à la main, dans un écran de réglages
+  système — `openSettings('notificationAccess')` l'ouvre, et `getPermissions()`
+  rend `notificationAccess`. La valeur est `unsupported` tant que le pont n'est
+  pas activé, et toujours `unsupported` sur iOS.
+- **La charge `data` du message FCM ne survit pas.** Une notification posée porte
+  son titre, son texte, son tag et son canal — pas la table `data`, qui ne
+  parvient à l'application que par l'intent de lancement, au tap. L'alerte arrive
+  avec `data.source === 'notificationBridge'` et rien d'autre : c'est à l'hôte de
+  retrouver le reste par son API (`GET /api/jobs/active` dans l'application
+  rider). C'est une limite du chemin, pas de l'implémentation.
+
+Désactivé par défaut. Corrige l'émetteur si tu peux ; sers-toi de ça quand tu ne
+peux pas.
 
 ---
 

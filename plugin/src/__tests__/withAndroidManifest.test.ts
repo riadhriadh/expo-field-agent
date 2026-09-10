@@ -41,6 +41,43 @@ describe('applyManifest', () => {
     }
   });
 
+  it('leaves the notification listener out unless the host asked for it', () => {
+    // Declaring it unasked would put the host's release through a Play review
+    // for a feature they are not using.
+    expect(names(application.service)).not.toContain('expo.modules.fieldagent.NotificationBridge');
+  });
+
+  it('declares the notification listener, guarded, when the host opts in', () => {
+    const opted = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions' }, alert: { notificationBridge: true } },
+      __dirname
+    );
+    const withBridge = applyManifest(emptyManifest(), opted, null);
+    const app = withBridge.manifest.application![0] as unknown as Record<string, unknown>;
+    const bridge = (app.service as { $: Record<string, string>; 'intent-filter'?: unknown[] }[]).find(
+      (node) => node.$['android:name'] === 'expo.modules.fieldagent.NotificationBridge'
+    );
+
+    expect(bridge).toBeDefined();
+    // Without the BIND permission any app on the device could bind it.
+    expect(bridge!.$['android:permission']).toBe(
+      'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE'
+    );
+    expect(bridge!.$['android:exported']).toBe('true');
+    expect(bridge!['intent-filter']).toBeDefined();
+  });
+
+  it('keeps the tracking service when the bridge is added next to it', () => {
+    const opted = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions' }, alert: { notificationBridge: true } },
+      __dirname
+    );
+    const app = applyManifest(emptyManifest(), opted, null).manifest
+      .application![0] as unknown as Record<string, unknown>;
+    expect(names(app.service)).toContain('expo.modules.fieldagent.TrackingService');
+    expect(names(app.service)).toContain('expo.modules.fieldagent.NotificationBridge');
+  });
+
   it('never asks for the battery-optimization dialog that gets apps delisted', () => {
     expect(names(manifest.manifest['uses-permission'])).not.toContain(
       'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'

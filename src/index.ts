@@ -29,6 +29,7 @@ const UNSUPPORTED: Permissions = {
   dndAccess: 'unsupported',
   fullScreenIntent: 'unsupported',
   autostart: 'unsupported',
+  notificationAccess: 'unsupported',
 };
 
 let warnedAboutExpoGo = false;

@@ -20,7 +20,15 @@ export type PermissionName =
    * been through it, 'undetermined' before, and 'unsupported' on a brand with
    * no known screen.
    */
-  | 'autostart';
+  | 'autostart'
+  /**
+   * Notification access, for the opt-in `alert.notificationBridge`. It is the
+   * only way to catch an FCM message that carries a `notification` block while
+   * the app is not in the foreground, because the Firebase SDK posts those
+   * itself without ever calling the app. 'unsupported' unless the host turned
+   * the bridge on, and always 'unsupported' on iOS.
+   */
+  | 'notificationAccess';
 
 export type Permissions = Record<PermissionName, PermissionState>;
 

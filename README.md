@@ -143,6 +143,7 @@ afternoon.
 | `alert.ttlSeconds` | `45` | |
 | `alert.torch` | `false` | |
 | `alert.channelVersion` | `1` | |
+| `alert.notificationBridge` | `false` | No notification listener is declared — see the FCM section for when to turn it on |
 | `bubble.icon` | `null` | A dot in the state colour |
 | `bubble.label` | `"Suivi"` | |
 | `bubble.colors.ok` | `"#1DB954"` | |
@@ -263,7 +264,7 @@ FieldAgent.getPendingAlertSync(): AlertPayload | null;
 FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', cb): Subscription;
 ```
 
-`Permissions` carries eight keys:
+`Permissions` carries nine keys:
 
 | key | what it is |
 |---|---|
@@ -274,6 +275,7 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 | `batteryUnrestricted` | the system battery-optimisation list |
 | `dndAccess` | `ACCESS_NOTIFICATION_POLICY` |
 | `fullScreenIntent` | **addition** — Android 14 puts `setFullScreenIntent` behind a special access. Without it the locked-screen alert silently degrades into an ordinary notification, so the state is made visible rather than assumed. |
+| `notificationAccess` | **addition** — the system notification-access screen, needed only by the opt-in `alert.notificationBridge`. `unsupported` unless you turned the bridge on. |
 | `autostart` | **addition** — the manufacturer's autostart screen. No API reads it: `granted` once the user has been sent there, `undetermined` before, `unsupported` on a brand with no known screen. |
 
 Two keys beyond the original contract, because without them the alert and the
@@ -460,15 +462,26 @@ TaskManager.defineTask(TASK, ({ data, error }) => {
 Notifications.registerTaskAsync(TASK);
 ```
 
-### The message must be data-only — this is not a detail
+### Every arrival path, and what actually happens
+
+| How the alert arrives | Full-screen screen? |
+|---|---|
+| Your server's response on `POST /positions` | ✅ needs no push at all — the service made the request |
+| FCM **data-only**, app open or backgrounded | ✅ via `addNotificationReceivedListener` → `triggerAlert()` |
+| FCM **data-only**, app killed | ✅ via a headless `expo-task-manager` task → `triggerAlert()` |
+| FCM **with a `notification` block**, app backgrounded or killed | ✅ **only** with `alert.notificationBridge: true` — otherwise ❌ |
+| App force-stopped from system settings | ❌ nothing reaches it, ever. Not fixable by any app |
+| iOS, any path | ❌ no full-screen exists. A `.timeSensitive` notification, `.critical` with Apple's entitlement |
+
+### The message should be data-only — and why no client code fixes it otherwise
 
 When an FCM message carries a `notification` block and your app is not in the
 foreground, the Firebase SDK posts that notification to the system tray
 **itself** and never calls into your app. No `onMessageReceived`, no background
-task, no `triggerAlert()`, no full-screen screen. Writing your own
-`FirebaseMessagingService` does not change this: the SDK short-circuits before
-any service you could possibly register. This is the one case that no amount of
-client-side code fixes — the fix is on the sender, and it is a single key.
+task, no `triggerAlert()`. Writing your own `FirebaseMessagingService` does not
+help: the SDK short-circuits before any service you could register.
+
+The free fix is on the sender, and it is a single key:
 
 ```json
 {
@@ -491,27 +504,43 @@ FCM constraint, not ours.
 **If you send through Expo's push service (`exp.host`) rather than raw FCM, this
 is already handled for you:** Expo sends data-only under the hood and
 `expo-notifications` renders the notification itself, so the background task
-runs and `triggerAlert()` is reached. The trap only bites when you talk to FCM
-directly.
+runs. The trap only bites when you talk to FCM directly.
 
-**"Force stop" is not the same as "app closed".** An app the user force-stopped
-from system settings receives no FCM message and no broadcast at all until they
-launch it again by hand. That is Android's *stopped* state, and nothing brings
-it back — not a push, not `BOOT_COMPLETED`, not the watchdog. Everywhere in this
-README, "app closed" means swiped from recents or killed by the system, never
-force-stopped.
+### `alert.notificationBridge` — when you do not control the sender
 
-From there native takes over: an `IMPORTANCE_HIGH` channel,
-`setFullScreenIntent`, `AlertActivity` over the lock screen, the ring on the
-alarm stream, and your `AlertHost` component rendered on the first frame.
+If the push comes from a system you cannot change, one path remains: a
+`NotificationListenerService`. It sees the notification *after* Android posted
+it, which is the only vantage point left once the Firebase SDK has bypassed your
+app.
 
-**What the plugin does not do:** it does not install its own
-`FirebaseMessagingService`. Only one service can win the `MESSAGING_EVENT`
-filter, and taking it would break `expo-notifications` in your app. Both wirings
-above go through it, so nothing is stolen from anyone. If you want the native FCM
-entry point anyway (one case: you do not use `expo-notifications` at all), ask —
-it means an extra `firebase-messaging` dependency and a version coupling, not a
-default worth choosing on your behalf.
+```json
+"alert": { "notificationBridge": true }
+```
+
+What it does: reads **only your own package's** notifications, matches them
+against `alert.titlePattern` exactly like any other source, fires the full-screen
+alert, and cancels the tray copy it replaced so the user does not get the same
+event twice. Its own alert notification is excluded by id, otherwise it would
+re-trigger itself forever.
+
+What it costs, and you should weigh this before turning it on:
+
+- It adds `BIND_NOTIFICATION_LISTENER_SERVICE` to your manifest. **Google Play
+  reviews every app that carries it** and expects notification access to be core
+  functionality. The plugin prints a warning at build time so this is never a
+  surprise found at release.
+- The user must grant notification access by hand, in a system settings screen —
+  `openSettings('notificationAccess')` opens it, and `getPermissions()` reports
+  `notificationAccess`. It is `unsupported` unless you turned the bridge on, and
+  always `unsupported` on iOS.
+- **The FCM `data` payload does not survive.** A posted notification carries its
+  title, text, tag and channel — not the data map, which only ever reaches the
+  app through the launch intent when the user taps. The alert arrives with
+  `data.source === 'notificationBridge'` and nothing else, so the host must
+  resolve the rest from its own API (`GET /api/jobs/active` in the rider app).
+  This is a real limitation of the path, not of the implementation.
+
+Off by default. Fix the sender if you can; use this when you cannot.
 
 ---
 

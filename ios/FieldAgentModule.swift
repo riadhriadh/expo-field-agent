@@ -173,7 +173,8 @@ public class FieldAgentModule: Module {
         "batteryUnrestricted": "unsupported",
         "dndAccess": "unsupported",
         "fullScreenIntent": "unsupported",
-        "autostart": "unsupported"
+        "autostart": "unsupported",
+        "notificationAccess": "unsupported"
       ])
     }
   }

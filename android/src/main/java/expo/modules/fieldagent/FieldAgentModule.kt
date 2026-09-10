@@ -230,6 +230,16 @@ class FieldAgentModule : Module() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) "granted"
             else if (Alerts.canUseFullScreenIntent(context)) "granted" else "denied"
         )
+        // Only meaningful when the host opted into the bridge; otherwise the
+        // service is not even in the manifest and the access grants nothing.
+        putString(
+            "notificationAccess",
+            when {
+                !NotificationBridge.isEnabled(context) -> "unsupported"
+                NotificationBridge.isGranted(context) -> "granted"
+                else -> "denied"
+            }
+        )
         putString(
             "autostart",
             when {
@@ -310,6 +320,7 @@ class FieldAgentModule : Module() {
             "batteryUnrestricted" -> Power.batterySettingsIntent()
             "fullScreenIntent" -> fullScreenIntentSettings()
             "autostart" -> Power.manufacturerIntent(context).also { Power.markConfirmed(context) }
+            "notificationAccess" -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             else -> Power.appDetailsIntent(context)
         }
         openForResult(intent, RC_BATTERY)

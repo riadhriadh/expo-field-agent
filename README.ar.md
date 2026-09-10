@@ -140,6 +140,7 @@ npx expo install expo-field-agent
 | `alert.ttlSeconds` | `45` | |
 | `alert.torch` | `false` | |
 | `alert.channelVersion` | `1` | |
+| `alert.notificationBridge` | `false` | لا يُعلَن أي مستمع إشعارات — راجع قسم FCM لمعرفة متى تُفعّله |
 | `bubble.icon` | `null` | نقطة بلون الحالة |
 | `bubble.label` | `"Suivi"` | |
 | `bubble.colors.ok` | `"#1DB954"` | |
@@ -259,7 +260,7 @@ FieldAgent.getPendingAlertSync(): AlertPayload | null;
 FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', cb): Subscription;
 ```
 
-يحمل `Permissions` ثمانية مفاتيح:
+يحمل `Permissions` تسعة مفاتيح:
 
 | المفتاح | ما هو |
 |---|---|
@@ -270,6 +271,7 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 | `batteryUnrestricted` | قائمة تحسين البطارية في النظام |
 | `dndAccess` | `ACCESS_NOTIFICATION_POLICY` |
 | `fullScreenIntent` | **إضافة** — أندرويد ١٤ يضع `setFullScreenIntent` خلف إذن خاص. بدونه يتراجع تنبيه شاشة القفل بصمت إلى إشعار عادي، لذلك جُعلت الحالة ظاهرة بدل أن تُفترض. |
+| `notificationAccess` | **إضافة** — شاشة الوصول إلى الإشعارات في النظام، ولا يلزم إلّا لـ `alert.notificationBridge` الاختياري. قيمتها `unsupported` ما لم تُفعّل الجسر. |
 | `autostart` | **إضافة** — شاشة التشغيل التلقائي عند الشركة المصنّعة. لا توجد API تقرأها: `granted` بعد أن يُرسَل المستخدم إليها، و`undetermined` قبل ذلك، و`unsupported` على علامة تجارية بلا شاشة معروفة. |
 
 مفتاحان زيادة على العقد الأصلي، لأنّ التنبيه والتتبّع بدونهما ينكسران على
@@ -447,19 +449,31 @@ TaskManager.defineTask(TASK, ({ data, error }) => {
 Notifications.registerTaskAsync(TASK);
 ```
 
-### يجب أن تكون الرسالة data-only — وهذه ليست تفصيلة
+### كل مسارات الوصول، وما يحدث فعلًا
+
+| كيف يصل التنبيه | شاشة كاملة؟ |
+|---|---|
+| ردّ خادمك على `POST /positions` | ✅ لا يحتاج أي push — الخدمة هي من قام بالطلب |
+| ‏FCM **data-only**، التطبيق مفتوح أو في الخلفية | ✅ عبر `addNotificationReceivedListener` ثم `triggerAlert()` |
+| ‏FCM **data-only**، التطبيق مقتول | ✅ عبر مهمّة headless من `expo-task-manager` ثم `triggerAlert()` |
+| ‏FCM **مع كتلة `notification`**، التطبيق في الخلفية أو مقتول | ✅ **فقط** مع `alert.notificationBridge: true` — وإلّا ❌ |
+| التطبيق موقوف قسرًا من الإعدادات | ❌ لا شيء يصله إطلاقًا. ولا تطبيق يستطيع إصلاح ذلك |
+| ‏iOS، أيًّا كان المسار | ❌ الشاشة الكاملة غير موجودة. إشعار `.timeSensitive`، و`.critical` مع تصريح Apple |
+
+### يُفضَّل أن تكون الرسالة data-only — ولماذا لا يصلحها أي كود عميل
 
 حين تحمل رسالة FCM كتلة `notification` ولا يكون تطبيقك في المقدّمة، فإنّ SDK
 الخاص بـ Firebase ينشر ذلك الإشعار في شريط النظام **بنفسه** ولا يستدعي كودك
-إطلاقًا. لا `onMessageReceived`، ولا مهمّة خلفية، ولا `triggerAlert()`، ولا شاشة
-كاملة. وكتابة `FirebaseMessagingService` خاص بك لا تغيّر شيئًا: الـ SDK يقصر
-الطريق قبل أي خدمة يمكنك تسجيلها. هذه هي الحالة الوحيدة التي لا يصلحها أي كود
-من جهة العميل — الإصلاح عند المُرسِل، وهو مفتاح واحد.
+إطلاقًا. لا `onMessageReceived`، ولا مهمّة خلفية، ولا `triggerAlert()`. وكتابة
+`FirebaseMessagingService` خاص بك لا تنفع: الـ SDK يقصر الطريق قبل أي خدمة
+يمكنك تسجيلها.
+
+الإصلاح المجاني عند المُرسِل، وهو مفتاح واحد:
 
 ```json
 {
   "message": {
-    "token": "<device token>",
+    "token": "<رمز الجهاز>",
     "android": { "priority": "HIGH" },
     "data": {
       "title": "Nouvelle course",
@@ -476,25 +490,39 @@ FCM لا منّا.
 
 **إن كنت ترسل عبر خدمة push من Expo (‏`exp.host`) بدل FCM مباشرةً فالأمر
 مُعالَج أصلًا:** ‏Expo يرسل data-only داخليًا و`expo-notifications` يعرض الإشعار
-بنفسه، فتعمل المهمّة الخلفية ويُبلَغ `triggerAlert()`. الفخّ لا يعضّ إلّا حين
-تخاطب FCM مباشرةً.
+بنفسه، فتعمل المهمّة الخلفية. الفخّ لا يعضّ إلّا حين تخاطب FCM مباشرةً.
 
-**«الإيقاف القسري» ليس «التطبيق مغلق».** التطبيق الذي أوقفه المستخدم قسرًا من
-إعدادات النظام لا يستقبل أي رسالة FCM ولا أي broadcast إطلاقًا حتى يُشغّله بيده
-من جديد. تلك هي حالة *stopped* في أندرويد، ولا شيء يُخرجه منها — لا push، ولا
-`BOOT_COMPLETED`، ولا المراقب. وفي كل هذا الملف، «التطبيق مغلق» تعني مُزاحًا من
-التطبيقات الحديثة أو مقتولًا من النظام، لا موقوفًا قسرًا.
+### `alert.notificationBridge` — حين لا تتحكّم بالمُرسِل
 
-من هناك يتولّى الجانب الأصلي: قناة `IMPORTANCE_HIGH`، و`setFullScreenIntent`،
-و`AlertActivity` فوق شاشة القفل، والرنين على مسار المنبّه، ومكوّن `AlertHost`
-مرسومًا في أول إطار.
+إذا كان الـ push يأتي من نظام لا تستطيع تغييره، يبقى طريق واحد:
+`NotificationListenerService`. يرى الإشعار *بعد* أن ينشره أندرويد، وهو نقطة
+المراقبة الوحيدة المتبقّية بعد أن يكون SDK الخاص بـ Firebase قد تجاوز تطبيقك.
 
-**ما لا يفعله الملحق:** لا يُثبّت `FirebaseMessagingService` خاصًّا به. خدمة
-واحدة فقط تفوز بمرشّح `MESSAGING_EVENT`، وأخذه كان سيكسر `expo-notifications`
-في تطبيقك. والربطان أعلاه يمرّان عبره، فلا شيء يُسلَب من أحد. وإن أردت رغم ذلك
-مدخل FCM الأصلي (حالة واحدة: أنت لا تستعمل `expo-notifications` إطلاقًا)،
-فاطلبه — يعني تبعية `firebase-messaging` إضافية وارتباطًا بالإصدارات، لا خيارًا
-افتراضيًا يُتَّخذ نيابةً عنك.
+```json
+"alert": { "notificationBridge": true }
+```
+
+ما يفعله: يقرأ **إشعارات حزمتك أنت فقط**، ويقارنها بـ `alert.titlePattern` تمامًا
+كأي مصدر آخر، ويُطلق التنبيه بملء الشاشة، ثم يلغي نسخة شريط النظام التي حلّ
+محلّها كي لا يرى المستخدم الحدث نفسه مرّتين. وإشعار التنبيه الخاص به مستثنى
+بالمعرّف، وإلّا لأعاد إطلاق نفسه بلا نهاية.
+
+وما يكلّفه، وهذا ما يجب أن تزنه قبل تفعيله:
+
+- يضيف `BIND_NOTIFICATION_LISTENER_SERVICE` إلى الـ manifest. **‏Google Play
+  تراجع كل تطبيق يحمله** وتتوقّع أن يكون الوصول إلى الإشعارات وظيفة أساسية.
+  والملحق يطبع تحذيرًا وقت البناء كي لا يكون هذا مفاجأة تُكتشَف عند النشر.
+- على المستخدم منح الوصول يدويًا من شاشة إعدادات النظام —
+  `openSettings('notificationAccess')` تفتحها، و`getPermissions()` يُرجع
+  `notificationAccess`. وقيمتها `unsupported` ما لم تُفعّل الجسر، و`unsupported`
+  دائمًا على iOS.
+- **حمولة `data` في رسالة FCM لا تنجو.** الإشعار المنشور يحمل عنوانه ونصّه ووسمه
+  وقناته — لا جدول `data`، الذي لا يصل التطبيق إلّا عبر intent الإطلاق عند النقر.
+  يصل التنبيه ومعه `data.source === 'notificationBridge'` ولا شيء غير ذلك، فعلى
+  التطبيق أن يجلب الباقي من واجهته (`GET /api/jobs/active` في تطبيق السائق). هذا
+  قيد في المسار نفسه، لا في التنفيذ.
+
+مُعطَّل افتراضيًا. أصلِح المُرسِل إن استطعت، واستعمل هذا حين لا تستطيع.
 
 ---
 
