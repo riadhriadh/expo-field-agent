@@ -4,6 +4,7 @@ import type {
   AlertPayload,
   AlertTrigger,
   BubbleState,
+  FieldAgentStrings,
   FieldAgentEventMap,
   FlushResult,
   PermissionName,
@@ -28,6 +29,8 @@ export declare class FieldAgentNativeModule extends NativeModule<FieldAgentEvent
   showBubble(): Promise<boolean>;
   hideBubble(): Promise<void>;
   setBubbleState(state: BubbleState, text: string | null): Promise<void>;
+  setBubbleImage(source: string | null): Promise<void>;
+  setStrings(values: FieldAgentStrings | null): Promise<void>;
 
   triggerAlert(payload: AlertTrigger): Promise<void>;
   dismissAlert(): Promise<void>;

@@ -74,6 +74,34 @@ export type FlushResult = { sent: number; queued: number };
 
 export type BubbleState = 'ok' | 'warn' | 'bad' | 'urgent';
 
+/**
+ * Every string the plugin shows to an end user, so the host can drive them from
+ * its own translations. Each key is optional: whatever you leave out keeps the
+ * value from `app.json`, and `setStrings(null)` puts all of them back.
+ *
+ * Android only in effect. iOS has no service notification, no channel and no
+ * bubble, and its two location prompts are read from `Info.plist` by the system
+ * in the phone's language — no runtime call can change those.
+ */
+export type FieldAgentStrings = {
+  /** Channel name for the permanent "on duty" notification. */
+  serviceChannelName?: string;
+  /** Title of that notification. */
+  serviceTitle?: string;
+  /** Its body, also used as the channel description. */
+  serviceBody?: string;
+  /** Channel name for alerts. */
+  alertChannelName?: string;
+  /** Channel name for the muted alert variant. */
+  alertChannelNameSilent?: string;
+  /** The action that stops a ringing alert. */
+  dismiss?: string;
+  /** Text shown in the bubble when no per-state text was given. */
+  bubbleLabel?: string;
+  /** Bubble accessibility sentence; `%s` is replaced by the label. */
+  bubbleAccessibility?: string;
+};
+
 export type AlertPayload = {
   title: string;
   body?: string;

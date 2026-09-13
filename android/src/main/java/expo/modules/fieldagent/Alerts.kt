@@ -136,8 +136,8 @@ object Alerts {
 
         if (manager.getNotificationChannel(ids.first) == null) {
             manager.createNotificationChannel(
-                NotificationChannel(ids.first, config.notification.channelName, NotificationManager.IMPORTANCE_LOW).apply {
-                    description = config.notification.body
+                NotificationChannel(ids.first, Strings.serviceChannelName(context), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = Strings.serviceBody(context)
                     setShowBadge(false)
                     setSound(null, null)
                     enableVibration(false)
@@ -147,7 +147,7 @@ object Alerts {
 
         if (manager.getNotificationChannel(ids.second) == null) {
             manager.createNotificationChannel(
-                NotificationChannel(ids.second, config.alert.channelName, NotificationManager.IMPORTANCE_HIGH).apply {
+                NotificationChannel(ids.second, Strings.alertChannelName(context), NotificationManager.IMPORTANCE_HIGH).apply {
                     // The sound is ours: we play it on the alarm stream so it is
                     // audible on silent, which a channel sound never is.
                     setSound(null, null)
@@ -162,7 +162,7 @@ object Alerts {
             manager.createNotificationChannel(
                 NotificationChannel(
                     ids.third,
-                    context.getString(R.string.field_agent_channel_silent, config.alert.channelName),
+                    Strings.alertChannelNameSilent(context),
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     setSound(null, null)
@@ -172,7 +172,54 @@ object Alerts {
             )
         }
 
+        renameChannels(manager, context, ids)
         return ids
+    }
+
+    /**
+     * Importance, sound and vibration are frozen at creation — but name and
+     * description are not, and re-creating with the same id updates exactly
+     * those two. Without this pass, a driver switching the app to Arabic would
+     * keep a French channel name in system settings until they uninstall.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
+    private fun renameChannels(
+        manager: NotificationManager,
+        context: Context,
+        ids: Triple<String, String, String>
+    ) {
+        val wanted = listOf(
+            ids.first to Strings.serviceChannelName(context),
+            ids.second to Strings.alertChannelName(context),
+            ids.third to Strings.alertChannelNameSilent(context)
+        )
+        for ((id, name) in wanted) {
+            val existing = manager.getNotificationChannel(id) ?: continue
+            if (existing.name?.toString() == name) continue
+            runCatching {
+                manager.createNotificationChannel(
+                    NotificationChannel(id, name, existing.importance).apply {
+                        description =
+                            if (id == ids.first) Strings.serviceBody(context) else existing.description
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * Called when the host changes language. The ongoing service notification is
+     * already on screen: rebuilding it is what makes the change visible now
+     * rather than at the next restart.
+     */
+    fun refreshLocalisedSurfaces(context: Context) {
+        val app = context.applicationContext
+        runCatching { ensureChannels(app) }
+        if (!Prefs.isDesiredRunning(app)) return
+        runCatching {
+            NotificationManagerCompat.from(app)
+                .notify(SERVICE_NOTIFICATION_ID, buildServiceNotification(app))
+        }
     }
 
     fun hasDndAccess(context: Context): Boolean =
@@ -295,8 +342,8 @@ object Alerts {
         val channelId = ensureChannels(context).first
         return NotificationCompat.Builder(context, channelId)
             .setSmallIcon(smallIcon(context))
-            .setContentTitle(config.notification.title)
-            .setContentText(config.notification.body)
+            .setContentTitle(Strings.serviceTitle(context))
+            .setContentText(Strings.serviceBody(context))
             .setColor(config.notification.color)
             .setOngoing(true)
             .setSilent(true)
@@ -346,7 +393,7 @@ object Alerts {
             .setFullScreenIntent(fullScreen, true)
             .setContentIntent(fullScreen)
             .setDeleteIntent(dismissIntent)
-            .addAction(0, context.getString(R.string.field_agent_dismiss), dismissIntent)
+            .addAction(0, Strings.dismiss(context), dismissIntent)
             .setOngoing(true)
             .setAutoCancel(false)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

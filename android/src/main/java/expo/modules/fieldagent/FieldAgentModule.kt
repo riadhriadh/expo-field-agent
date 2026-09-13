@@ -152,6 +152,18 @@ class FieldAgentModule : Module() {
 
         AsyncFunction("hideBubble") { Bubble.hide(context) }
 
+        AsyncFunction("setStrings") { values: Map<String, String>? ->
+            Strings.set(context, values)
+            // Channels and the ongoing notification are already on screen; the
+            // language has to reach them now, not at the next service restart.
+            Alerts.refreshLocalisedSurfaces(context)
+            Bubble.repaint(context)
+        }
+
+        AsyncFunction("setBubbleImage") { source: String? ->
+            Bubble.setImage(context, source)
+        }
+
         AsyncFunction("setBubbleState") { state: String, text: String? ->
             Bubble.setState(context, state, text)
         }

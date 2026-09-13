@@ -254,6 +254,10 @@ FieldAgent.getState(): Promise<TrackingState>;
 FieldAgent.showBubble(): Promise<boolean>;                             // false on iOS, or without the permission
 FieldAgent.hideBubble(): Promise<void>;
 FieldAgent.setBubbleState(s: 'ok' | 'warn' | 'bad' | 'urgent', text?: string): Promise<void>;
+FieldAgent.setBubbleImage(source: string | number | null): Promise<void>;  // fichier local, null = bubble.icon
+
+// Langue ------------------------------------------------------------------
+FieldAgent.setStrings(values: FieldAgentStrings | null): Promise<void>;    // null = retour a app.json
 
 // Alert -------------------------------------------------------------------
 FieldAgent.triggerAlert({ title, body?, data?, tag?, channelId? }): Promise<void>;
@@ -308,6 +312,80 @@ only.
 
 A position is **never** written to the logs, neither on Android nor on iOS: it
 is personal data.
+
+---
+
+## Language, and the bubble picture
+
+### `setStrings()` — the app's language, not the phone's
+
+Every string the plugin shows a driver can be replaced at runtime, from the
+translations your app already has:
+
+```ts
+await FieldAgent.setStrings({
+  serviceChannelName: 'On-duty tracking',
+  serviceTitle: 'On duty',
+  serviceBody: 'Your position is shared while you work.',
+  alertChannelName: 'New jobs',
+  alertChannelNameSilent: 'New jobs (muted)',
+  dismiss: 'Dismiss',
+  bubbleLabel: 'Tracking',
+  bubbleAccessibility: '%s — tap to open the app',
+});
+```
+
+Every key is optional: an omitted one keeps the `app.json` value, and
+`setStrings(null)` drops all of them. Call it once at startup and again whenever
+the user changes language.
+
+**Why runtime rather than `values-ar/strings.xml`.** A per-locale resource
+follows the *phone*. A rider app almost always carries its own language picker,
+and a phone in French says nothing about a driver who chose Arabic in the app.
+This is the only mechanism that follows the app.
+
+**It is persisted on purpose.** The service comes back after a reboot with no
+JavaScript running anywhere; a language held in memory would come back as the
+default, and the driver would find a notification in a language they never
+picked.
+
+**Channels are renamed on the spot.** A notification channel freezes its
+importance, sound and vibration at creation — but not its name, and re-creating
+it with the same id updates exactly that. Without this pass a driver switching
+to Arabic would keep a French channel name in system settings until they
+uninstall. The ongoing service notification is rebuilt in the same call.
+
+**What it cannot do.** The `error` event carries a stable `code` (`OFFLINE`,
+`VOLUME`, `QUEUE_FULL`…) and a developer-facing `message`; translate from the
+code, the message is for your logs. And on iOS this is a no-op: there is no
+service notification, no channel and no bubble, and the two location prompts are
+read from `Info.plist` by the system in the phone's language — localize those
+with `InfoPlist.strings`, nothing at runtime can change them.
+
+### `setBubbleImage()` — swapping the picture during a shift
+
+`bubble.icon` in `app.json` is the picture bundled at build time. This changes it
+while the app runs — the job type, a photo your code just downloaded:
+
+```ts
+await FieldAgent.setBubbleImage('file:///data/user/0/…/client.jpg');
+await FieldAgent.setBubbleImage(null);   // back to bubble.icon
+```
+
+It accepts a `file://` uri, an absolute path, a `content://` uri, or the result
+of `require('./x.png')`. **Local sources only** — downloading belongs to the host,
+which owns the auth, the cache and the retry policy, and the bubble has to stay a
+cheap window. An `http(s)` source is refused with an `error` of code
+`BUBBLE_IMAGE` rather than silently ignored.
+
+Bounds are read before the pixels are, so a 12 megapixel photo is sampled down
+instead of decoded whole into a 24dp slot. A picture that fails to load falls
+back to the plain state dot, never to an empty gap. The path is persisted, so the
+bubble keeps it when the service restarts with no JS.
+
+**In a development build, `require()` is served by Metro over http** and is
+therefore refused, with an error saying so. Bundled images belong in
+`bubble.icon`, which is a real drawable in every build type.
 
 ---
 

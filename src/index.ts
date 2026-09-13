@@ -1,5 +1,5 @@
 import type { EventSubscription } from 'expo-modules-core';
-import { Platform } from 'react-native';
+import { Image, Platform } from 'react-native';
 
 import nativeModule, { MISSING_NATIVE_MODULE, requireModule } from './FieldAgentModule';
 import { normalizeAlert } from './normalize';
@@ -8,6 +8,7 @@ import type {
   AlertTrigger,
   BubbleState,
   FieldAgentEventMap,
+  FieldAgentStrings,
   FieldAgentEventName,
   FlushResult,
   PermissionName,
@@ -124,6 +125,64 @@ export async function hideBubble(): Promise<void> {
 export async function setBubbleState(state: BubbleState, text?: string): Promise<void> {
   if (!nativeModule || Platform.OS !== 'android') return;
   return nativeModule.setBubbleState(state, text ?? null);
+}
+
+/**
+ * Swaps the bubble picture while the app runs. `null` puts `bubble.icon` back.
+ *
+ * Takes a local source only: a `file://` path, an absolute path, a `content://`
+ * uri, or the result of `require('./x.png')`. Downloading is the host's job —
+ * it owns the auth, the cache and the retry policy, and the bubble has to stay
+ * a cheap window.
+ */
+export async function setBubbleImage(source: string | number | null): Promise<void> {
+  if (!nativeModule || Platform.OS !== 'android') return;
+  if (source === null || source === undefined) return nativeModule.setBubbleImage(null);
+
+  let uri: string | undefined;
+  if (typeof source === 'number') {
+    uri = Image.resolveAssetSource(source)?.uri;
+    // In a dev build Metro serves bundled assets over http, and native refuses
+    // remote sources by design. Bundled images belong in `bubble.icon`, which
+    // is a real drawable in every build type.
+    if (uri && /^https?:/.test(uri)) {
+      throw new Error(
+        "setBubbleImage: un require() est servi par Metro en http dans un development build. " +
+          "Passe l'image bundlee par `bubble.icon` dans app.json, ou donne un chemin de fichier."
+      );
+    }
+  } else {
+    uri = source;
+  }
+
+  if (!uri || uri.length === 0) {
+    throw new Error('setBubbleImage attend un chemin de fichier, un require(), ou null.');
+  }
+  return nativeModule.setBubbleImage(uri);
+}
+
+// --- Wording ---------------------------------------------------------------
+
+/**
+ * Hands the plugin the strings it shows to the driver, in whatever language the
+ * app has chosen. Persisted natively, so the service still speaks that language
+ * after a reboot, when no JavaScript is running to tell it again.
+ *
+ * `null` drops every override and goes back to `app.json`. Call it once at
+ * startup and again whenever the user changes language — the channels get
+ * renamed and the ongoing notification is rebuilt on the spot.
+ */
+export async function setStrings(values: FieldAgentStrings | null): Promise<void> {
+  if (!nativeModule || Platform.OS !== 'android') return;
+  if (values === null || values === undefined) return nativeModule.setStrings(null);
+
+  // Undefined entries would cross the bridge as nulls and blank a label; the
+  // contract is that an omitted key keeps the configured value.
+  const cleaned: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value === 'string' && value.length > 0) cleaned[key] = value;
+  }
+  return nativeModule.setStrings(cleaned);
 }
 
 // --- Alert -----------------------------------------------------------------

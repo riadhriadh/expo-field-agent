@@ -103,6 +103,14 @@ public class FieldAgentModule: Module {
 
     AsyncFunction("showBubble") { () -> Bool in false }
     AsyncFunction("hideBubble") { () -> Void in }
+    // Android-only surfaces. Storing the strings would be storing something
+    // nothing on this platform can read: there is no service notification, no
+    // channel and no bubble. The two location prompts come from Info.plist,
+    // which the system reads in the phone's language, not ours.
+    AsyncFunction("setStrings") { (_: [String: String]?) in }
+
+    AsyncFunction("setBubbleImage") { (_: String?) in }
+
     AsyncFunction("setBubbleState") { (_: String, _: String?) -> Void in }
 
     // MARK: Alert

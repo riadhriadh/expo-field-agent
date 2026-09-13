@@ -38,7 +38,7 @@ object Bubble {
     private val main = Handler(Looper.getMainLooper())
 
     private var root: LinearLayout? = null
-    private var dot: View? = null
+    private var dot: ImageView? = null
     private var label: TextView? = null
 
     private const val SIZE_DP = 56
@@ -103,16 +103,10 @@ object Bubble {
             isFocusable = true
         }
 
-        val indicator = if (config.bubble.icon != null) {
-            ImageView(context).apply {
-                val resource = context.resources.getIdentifier(config.bubble.icon, "drawable", context.packageName)
-                if (resource != 0) setImageResource(resource)
-                layoutParams = LinearLayout.LayoutParams(dp(context, ICON_DP), dp(context, ICON_DP))
-            }
-        } else {
-            View(context).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(context, 16), dp(context, 16))
-            }
+        // Always an ImageView, even with no picture to show: swapping the view
+        // type later would mean tearing down a window the driver is looking at.
+        val indicator = ImageView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(context, 16), dp(context, 16))
         }
 
         val text = TextView(context).apply {
@@ -267,13 +261,51 @@ object Bubble {
             cornerRadius = dp(context, SIZE_DP / 2).toFloat()
             setColor(color)
         }
-        dot?.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.WHITE)
+        paintIndicator(context, config)
+
+        val shown = text ?: Strings.bubbleLabel(context)
+        label?.text = shown
+        container.contentDescription = Strings.bubbleAccessibility(context, shown)
+    }
+
+    /**
+     * Runtime image first, then the one bundled through `bubble.icon`, then the
+     * plain state dot. Resolved on every repaint rather than cached, because the
+     * host can swap it between two states and the bubble has no other signal.
+     */
+    private fun paintIndicator(context: Context, config: FieldAgentConfig) {
+        val view = dot ?: return
+        val runtime = Prefs.of(context).getString(Prefs.BUBBLE_IMAGE, null)
+        val source = runtime ?: config.bubble.icon
+        val drawable = source?.let { Images.load(context, it, dp(context, ICON_DP)) }
+
+        if (drawable != null) {
+            view.setImageDrawable(drawable)
+            view.background = null
+            view.layoutParams = LinearLayout.LayoutParams(dp(context, ICON_DP), dp(context, ICON_DP))
+        } else {
+            // No picture, or one that failed to load: the state dot is the
+            // fallback, never an empty gap the driver cannot read.
+            view.setImageDrawable(null)
+            view.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.WHITE)
+            }
+            view.layoutParams = LinearLayout.LayoutParams(dp(context, 16), dp(context, 16))
         }
-        label?.text = text ?: config.bubble.label
-        container.contentDescription =
-            context.getString(R.string.field_agent_bubble_description, text ?: config.bubble.label)
+        view.requestLayout()
+    }
+
+    /** Repaints only if the bubble is up; harmless otherwise. */
+    fun repaint(context: Context) {
+        val app = context.applicationContext
+        main.post { root?.let { paint(app) } }
+    }
+
+    /** `null` puts `bubble.icon` back. Repaints at once when the bubble is up. */
+    fun setImage(context: Context, source: String?) {
+        Prefs.putString(context.applicationContext, Prefs.BUBBLE_IMAGE, source)
+        main.post { root?.let { paint(context.applicationContext) } }
     }
 
     private fun detach(context: Context) {

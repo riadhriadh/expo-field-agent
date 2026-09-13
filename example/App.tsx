@@ -162,7 +162,50 @@ export default function App() {
               onPress={run('setBubbleState', () => FieldAgent.setBubbleState(s, s.toUpperCase()))}
             />
           ))}
+          <Button
+            label="setBubbleImage (ressource bundlee)"
+            onPress={run('setBubbleImage', () =>
+              FieldAgent.setBubbleImage('field_agent_notification')
+            )}
+          />
+          <Button
+            label="setBubbleImage(null) — retour a bubble.icon"
+            onPress={run('setBubbleImage(null)', () => FieldAgent.setBubbleImage(null))}
+          />
           {Platform.OS === 'ios' && <Text style={styles.note}>iOS : showBubble() rend false, par conception.</Text>}
+        </Section>
+
+        <Section title="Langue">
+          <Button
+            label="setStrings (arabe)"
+            onPress={run('setStrings(ar)', () =>
+              FieldAgent.setStrings({
+                serviceChannelName: 'التتبّع أثناء الخدمة',
+                serviceTitle: 'أثناء الخدمة',
+                serviceBody: 'تتم مشاركة موقعك أثناء عملك.',
+                alertChannelName: 'المهام الجديدة',
+                dismiss: 'تجاهل',
+                bubbleLabel: 'تتبّع',
+              })
+            )}
+          />
+          <Button
+            label="setStrings (anglais)"
+            onPress={run('setStrings(en)', () =>
+              FieldAgent.setStrings({
+                serviceChannelName: 'On-duty tracking',
+                serviceTitle: 'On duty',
+                serviceBody: 'Your position is shared while you work.',
+                alertChannelName: 'New jobs',
+                dismiss: 'Dismiss',
+                bubbleLabel: 'Tracking',
+              })
+            )}
+          />
+          <Button
+            label="setStrings(null) — retour a app.json"
+            onPress={run('setStrings(null)', () => FieldAgent.setStrings(null))}
+          />
         </Section>
 
         <Section title="Alerte">

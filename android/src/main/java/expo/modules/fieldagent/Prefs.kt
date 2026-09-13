@@ -15,6 +15,8 @@ object Prefs {
     const val DESIRED_RUNNING = "desired_running"
     const val OVERRIDES = "overrides"
     const val AUTH_HEADER = "auth_header"
+    /** Host-supplied translations, so a reboot does not undo the chosen language. */
+    const val STRINGS = "strings"
 
     const val LAST_FIX_AT = "last_fix_at"
     const val LAST_SENT_AT = "last_sent_at"
@@ -24,6 +26,8 @@ object Prefs {
     const val BUBBLE_X = "bubble_x"
     const val BUBBLE_Y = "bubble_y"
     const val BUBBLE_STATE = "bubble_state"
+    /** Runtime image set by the host; survives a service restart with no JS. */
+    const val BUBBLE_IMAGE = "bubble_image"
     const val BUBBLE_TEXT = "bubble_text"
 
     /** Saved before the alert raises the alarm stream, restored after. */

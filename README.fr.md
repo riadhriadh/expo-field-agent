@@ -259,6 +259,10 @@ FieldAgent.getState(): Promise<TrackingState>;
 FieldAgent.showBubble(): Promise<boolean>;                             // false si iOS ou permission absente
 FieldAgent.hideBubble(): Promise<void>;
 FieldAgent.setBubbleState(s: 'ok' | 'warn' | 'bad' | 'urgent', text?: string): Promise<void>;
+FieldAgent.setBubbleImage(source: string | number | null): Promise<void>;  // fichier local, null = bubble.icon
+
+// Langue ------------------------------------------------------------------
+FieldAgent.setStrings(values: FieldAgentStrings | null): Promise<void>;    // null = retour a app.json
 
 // Alerte ------------------------------------------------------------------
 FieldAgent.triggerAlert({ title, body?, data? }): Promise<void>;
@@ -313,6 +317,83 @@ cette alerte-là uniquement.
 
 Une position n'est **jamais** écrite dans les journaux, ni côté Android ni côté
 iOS : c'est une donnée personnelle.
+
+---
+
+## La langue, et l'image de la bulle
+
+### `setStrings()` — la langue de l'app, pas celle du téléphone
+
+Toutes les chaînes que le plugin montre à un livreur sont remplaçables à chaud,
+depuis les traductions que ton application a déjà :
+
+```ts
+await FieldAgent.setStrings({
+  serviceChannelName: 'التتبّع أثناء الخدمة',
+  serviceTitle: 'أثناء الخدمة',
+  serviceBody: 'تتم مشاركة موقعك أثناء عملك.',
+  alertChannelName: 'المهام الجديدة',
+  alertChannelNameSilent: 'المهام الجديدة (صامت)',
+  dismiss: 'تجاهل',
+  bubbleLabel: 'تتبّع',
+  bubbleAccessibility: '%s — اضغط لفتح التطبيق',
+});
+```
+
+Chaque clé est optionnelle : celle que tu omets garde la valeur d'`app.json`, et
+`setStrings(null)` les enlève toutes. Appelle-la une fois au démarrage, puis à
+chaque changement de langue.
+
+**Pourquoi à chaud plutôt que `values-ar/strings.xml`.** Une ressource par locale
+suit le *téléphone*. Une application de livraison a presque toujours son propre
+sélecteur de langue, et un téléphone en français ne dit rien d'un livreur qui a
+choisi l'arabe dans l'app. C'est le seul mécanisme qui suit l'application.
+
+**C'est persisté exprès.** Le service revient après un redémarrage sans qu'aucun
+JavaScript ne tourne ; une langue gardée en mémoire reviendrait au défaut, et le
+livreur trouverait une notification dans une langue qu'il n'a jamais choisie.
+
+**Les canaux sont renommés sur-le-champ.** Un canal de notification fige son
+importance, son son et sa vibration à la création — mais pas son nom, et le
+recréer avec le même identifiant met à jour exactement ça. Sans cette passe, un
+livreur qui passe à l'arabe garderait un nom de canal français dans les réglages
+système jusqu'à la désinstallation. La notification de service en cours est
+reconstruite dans le même appel.
+
+**Ce que ça ne fait pas.** L'événement `error` porte un `code` stable (`OFFLINE`,
+`VOLUME`, `QUEUE_FULL`…) et un `message` destiné au développeur : traduis à
+partir du code, le message est pour tes journaux. Et sur iOS c'est sans effet :
+pas de notification de service, pas de canal, pas de bulle, et les deux phrases
+de localisation sont lues dans `Info.plist` par le système, dans la langue du
+téléphone — localise-les avec `InfoPlist.strings`, aucun appel à chaud ne les
+changera.
+
+### `setBubbleImage()` — changer l'image pendant le service
+
+`bubble.icon` dans `app.json`, c'est l'image embarquée à la compilation. Ceci la
+change pendant que l'app tourne — le type de course, une photo que ton code vient
+de télécharger :
+
+```ts
+await FieldAgent.setBubbleImage('file:///data/user/0/…/client.jpg');
+await FieldAgent.setBubbleImage(null);   // retour a bubble.icon
+```
+
+Elle accepte une uri `file://`, un chemin absolu, une uri `content://`, ou le
+résultat d'un `require('./x.png')`. **Sources locales uniquement** — le
+téléchargement appartient à l'hôte, qui a son authentification, son cache et sa
+politique de reprise, et la bulle doit rester une fenêtre légère. Une source
+`http(s)` est refusée par un `error` de code `BUBBLE_IMAGE`, pas ignorée en
+silence.
+
+Les dimensions sont lues avant les pixels : une photo de 12 mégapixels est
+sous-échantillonnée au lieu d'être décodée entière dans un emplacement de 24 dp.
+Une image qui échoue retombe sur la pastille d'état, jamais sur un trou. Le
+chemin est persisté, donc la bulle le retrouve quand le service repart sans JS.
+
+**Dans un development build, un `require()` est servi par Metro en http** et donc
+refusé, avec un message qui le dit. Les images embarquées vont dans
+`bubble.icon`, qui est un vrai drawable dans tous les types de build.
 
 ---
 
