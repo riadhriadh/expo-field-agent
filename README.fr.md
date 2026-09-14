@@ -2,7 +2,10 @@
 
 [English](README.md) · **Français** · [العربية](README.ar.md)
 
-> **Development build obligatoire. Ce paquet ne fonctionne pas dans Expo Go.**
+> **Development build obligatoire pour que quoi que ce soit se passe.**
+>
+> Dans Expo Go le paquet **dégrade au lieu de casser** : chaque appel rend une
+> valeur neutre, `isAvailable` vaut `false`, et rien n'est suivi, affiché ni sonné.
 >
 > ```bash
 > npx expo prebuild && npx expo run:android
@@ -15,6 +18,54 @@ téléphone verrouillé compris.
 
 Android : complet. iOS : ce que la plateforme permet, et rien de plus — le
 tableau des limites est plus bas, écrit noir sur blanc.
+
+---
+
+## Expo Go — dégradé, jamais bloquant
+
+La moitié native ne peut pas exister dans Expo Go : Expo Go embarque un jeu figé
+de code natif dont le tien ne fait pas partie. C'est un fait de plateforme,
+aucun paquet ne le change.
+
+Ce que ce paquet en fait : **il dégrade.** L'import est sans danger, et chaque
+appel rend une valeur neutre au lieu de lever, donc tu peux construire et
+naviguer tes écrans dans Expo Go et garder un development build pour ce qui
+demande un appareil.
+
+```ts
+import * as FieldAgent from 'expo-field-agent';
+
+if (!FieldAgent.isAvailable) {
+  // Expo Go : dis-le dans l'interface plutot que de livrer un interrupteur mort.
+}
+```
+
+| Appel | Dans Expo Go |
+|---|---|
+| `isAvailable` | `false` |
+| `getPermissions()` | toutes les clés à `'unsupported'` |
+| `start()`, `stop()`, `setAuthHeader()`, `setInterval()`, `openSettings()` | se résolvent, ne font rien |
+| `isRunning()` | `false` |
+| `flush()` | `{ sent: 0, queued: 0 }` |
+| `getState()` | `running:false`, `queued:0`, et `lastError` qui dit pourquoi |
+| `showBubble()` | `false` |
+| `triggerAlert()`, `dismissAlert()`, `setAlertSound()`, `setStrings()`, `setBubbleImage()` | se résolvent, ne font rien |
+| `getPendingAlert()` / `getPendingAlertSync()` | `null` |
+| `addListener()` | un abonnement qui ne se déclenche jamais ; `.remove()` est sans risque |
+| `<AlertHost>` | ne rend rien |
+
+Un seul `console.warn` part au premier appel dégradé — une fois, pas à chaque
+appel, pour rester lisible.
+
+**Les erreurs d'argument lèvent toujours, dans Expo Go comme ailleurs.**
+`triggerAlert({})` sans titre, `setInterval(0)`, un `setBubbleImage('')` vide :
+ce sont des bugs dans ton code, pas des limites de plateforme. Les avaler ici les
+laisserait filer en production.
+
+**Ne confonds pas dégradation et prise en charge.** Rien n'est suivi, aucune
+bulle n'est dessinée, aucune alerte ne sonne. `isAvailable` est le signal
+honnête — branche ton interface dessus, et fais les vrais essais sur un
+development build.
 
 ---
 

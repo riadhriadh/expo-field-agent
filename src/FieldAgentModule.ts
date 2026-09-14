@@ -47,11 +47,7 @@ export declare class FieldAgentNativeModule extends NativeModule<FieldAgentEvent
 const nativeModule = requireOptionalNativeModule<FieldAgentNativeModule>('FieldAgent');
 
 export const MISSING_NATIVE_MODULE =
-  'expo-field-agent est un module natif : il ne fonctionne pas dans Expo Go. Lance `npx expo prebuild && npx expo run:android`.';
-
-export function requireModule(): FieldAgentNativeModule {
-  if (!nativeModule) throw new Error(MISSING_NATIVE_MODULE);
-  return nativeModule;
-}
+  'expo-field-agent : module natif absent (Expo Go). Les appels rendent des valeurs neutres et ne font rien — ' +
+  'ni suivi, ni bulle, ni alerte. Pour les avoir : `npx expo prebuild && npx expo run:android`.';
 
 export default nativeModule;

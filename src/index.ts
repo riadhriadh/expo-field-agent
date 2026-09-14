@@ -1,7 +1,7 @@
 import type { EventSubscription } from 'expo-modules-core';
 import { Image, Platform } from 'react-native';
 
-import nativeModule, { MISSING_NATIVE_MODULE, requireModule } from './FieldAgentModule';
+import nativeModule, { MISSING_NATIVE_MODULE } from './FieldAgentModule';
 import { normalizeAlert } from './normalize';
 import type {
   AlertPayload,
@@ -42,6 +42,30 @@ function warnOnce(): void {
   console.warn(MISSING_NATIVE_MODULE);
 }
 
+/**
+ * Whether the native side is actually there.
+ *
+ * `false` in Expo Go, where every call below degrades to a neutral value rather
+ * than throwing — an app that merely imports this package has no reason to
+ * crash on a platform that simply cannot host it.
+ *
+ * Branch your interface on this instead of discovering it from a silent no-op:
+ * a "tracking unavailable" banner is honest, a switch that does nothing is not.
+ */
+export const isAvailable: boolean = nativeModule != null;
+
+/**
+ * The degraded return path. Warns once, then resolves.
+ *
+ * Argument validation is deliberately NOT routed through here: a missing alert
+ * title is a bug in the host's code and must throw everywhere, or it ships.
+ * Only the platform limitation degrades.
+ */
+function unavailable<T>(value: T): Promise<T> {
+  warnOnce();
+  return Promise.resolve(value);
+}
+
 // --- Permissions -----------------------------------------------------------
 
 export async function getPermissions(): Promise<Permissions> {
@@ -67,17 +91,20 @@ export async function requestPermissions(opts?: { skip?: PermissionName[] }): Pr
 }
 
 export async function openSettings(which: PermissionName): Promise<void> {
-  return requireModule().openSettings(which);
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.openSettings(which);
 }
 
 // --- Tracking --------------------------------------------------------------
 
 export async function start(options?: Partial<TrackingOptions>): Promise<void> {
-  return requireModule().start(options ?? null);
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.start(options ?? null);
 }
 
 export async function stop(): Promise<void> {
-  return requireModule().stop();
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.stop();
 }
 
 export async function isRunning(): Promise<boolean> {
@@ -87,7 +114,8 @@ export async function isRunning(): Promise<boolean> {
 
 /** Stored with the platform keystore; pass null to forget it (logout). */
 export async function setAuthHeader(value: string | null): Promise<void> {
-  return requireModule().setAuthHeader(value);
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.setAuthHeader(value);
 }
 
 /** Applied to the running service without restarting it. */
@@ -95,11 +123,13 @@ export async function setInterval(seconds: number): Promise<void> {
   if (!Number.isFinite(seconds) || seconds < 1) {
     throw new Error('setInterval attend un nombre de secondes >= 1.');
   }
-  return requireModule().setIntervalSeconds(seconds);
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.setIntervalSeconds(seconds);
 }
 
 export async function flush(): Promise<FlushResult> {
-  return requireModule().flush();
+  if (!nativeModule) return unavailable({ sent: 0, queued: 0 });
+  return nativeModule.flush();
 }
 
 export async function getState(): Promise<TrackingState> {
@@ -136,9 +166,13 @@ export async function setBubbleState(state: BubbleState, text?: string): Promise
  * a cheap window.
  */
 export async function setBubbleImage(source: string | number | null): Promise<void> {
-  if (!nativeModule || Platform.OS !== 'android') return;
-  if (source === null || source === undefined) return nativeModule.setBubbleImage(null);
+  if (source === null || source === undefined) {
+    if (!nativeModule || Platform.OS !== 'android') return unavailable(undefined);
+    return nativeModule.setBubbleImage(null);
+  }
 
+  // Validation before the availability check, on purpose: a bad source is a bug
+  // in the host's code, and Expo Go must not be the place where it hides.
   let uri: string | undefined;
   if (typeof source === 'number') {
     uri = Image.resolveAssetSource(source)?.uri;
@@ -158,6 +192,8 @@ export async function setBubbleImage(source: string | number | null): Promise<vo
   if (!uri || uri.length === 0) {
     throw new Error('setBubbleImage attend un chemin de fichier, un require(), ou null.');
   }
+
+  if (!nativeModule || Platform.OS !== 'android') return unavailable(undefined);
   return nativeModule.setBubbleImage(uri);
 }
 
@@ -191,11 +227,13 @@ export async function triggerAlert(payload: AlertTrigger): Promise<void> {
   if (!payload || typeof payload.title !== 'string' || payload.title.length === 0) {
     throw new Error('triggerAlert attend un objet { title: string }.');
   }
-  return requireModule().triggerAlert(payload);
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.triggerAlert(payload);
 }
 
 export async function dismissAlert(): Promise<void> {
-  return requireModule().dismissAlert();
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.dismissAlert();
 }
 
 /**
@@ -203,7 +241,8 @@ export async function dismissAlert(): Promise<void> {
  * left alone — a mute setting that still rings is a lie.
  */
 export async function setAlertSound(enabled: boolean): Promise<void> {
-  return requireModule().setAlertSound(enabled);
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.setAlertSound(enabled);
 }
 
 /** The alert the native side is holding, if any. Safe to call before mount. */

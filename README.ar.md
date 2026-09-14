@@ -2,7 +2,10 @@
 
 [English](README.md) · [Français](README.fr.md) · **العربية**
 
-> **يلزم development build. هذه الحزمة لا تعمل داخل Expo Go.**
+> **يلزم development build كي يحدث أي شيء فعليًا.**
+>
+> داخل Expo Go تتدهور الحزمة **بدل أن تنهار**: كل نداء يُرجع قيمة محايدة،
+> و`isAvailable` يساوي `false`، ولا شيء يُتتبَّع أو يُعرَض أو يرنّ.
 >
 > ```bash
 > npx expo prebuild && npx expo run:android
@@ -14,6 +17,50 @@ React Native **من تطبيقك أنت**، حتى والهاتف مقفل.
 
 أندرويد: كامل. iOS: ما تسمح به المنصّة ولا شيء أكثر — جدول الحدود في الأسفل
 يقول بالحرف ما هو غير متوفّر.
+
+---
+
+## ‏Expo Go — تدهور، لا حجب
+
+النصف الأصلي لا يمكن أن يوجد داخل Expo Go: فهو يحمل مجموعة ثابتة من الكود
+الأصلي ليس كودك منها. هذه حقيقة في المنصّة، ولا حزمة تغيّرها.
+
+وما تفعله هذه الحزمة حيالها: **تتدهور.** الاستيراد آمن، وكل نداء يُرجع قيمة
+محايدة بدل أن يرمي استثناءً، فتستطيع بناء شاشاتك والتنقّل بينها داخل Expo Go،
+وتحتفظ بـ development build لما يحتاج جهازًا فعليًا.
+
+```ts
+import * as FieldAgent from 'expo-field-agent';
+
+if (!FieldAgent.isAvailable) {
+  // Expo Go: قُلها في الواجهة بدل شحن مفتاح لا يفعل شيئًا.
+}
+```
+
+| النداء | داخل Expo Go |
+|---|---|
+| `isAvailable` | `false` |
+| `getPermissions()` | كل المفاتيح `'unsupported'` |
+| `start()`، `stop()`، `setAuthHeader()`، `setInterval()`، `openSettings()` | تُحَلّ ولا تفعل شيئًا |
+| `isRunning()` | `false` |
+| `flush()` | `{ sent: 0, queued: 0 }` |
+| `getState()` | `running:false`، و`queued:0`، و`lastError` يقول السبب |
+| `showBubble()` | `false` |
+| `triggerAlert()`، `dismissAlert()`، `setAlertSound()`، `setStrings()`، `setBubbleImage()` | تُحَلّ ولا تفعل شيئًا |
+| `getPendingAlert()` / `getPendingAlertSync()` | `null` |
+| `addListener()` | اشتراك لا يُطلَق أبدًا، و`.remove()` آمن |
+| `<AlertHost>` | لا يعرض شيئًا |
+
+يُطلَق `console.warn` واحد عند أول نداء متدهور — مرّة واحدة لا عند كل نداء، كي
+تبقى الشاشة مقروءة.
+
+**أخطاء الوسائط تبقى ترمي استثناءً، في Expo Go كما في غيره.**
+`triggerAlert({})` بلا عنوان، و`setInterval(0)`، و`setBubbleImage('')` الفارغ:
+هذه عيوب في كودك لا قيود في المنصّة. وابتلاعها هنا كان سيُمرّرها إلى الإنتاج.
+
+**ولا تخلط بين التدهور والدعم.** لا شيء يُتتبَّع، ولا فقاعة تُرسَم، ولا تنبيه
+يرنّ. و`isAvailable` هو الإشارة الصادقة — اربط واجهتك بها، واجعل الاختبار
+الحقيقي على development build.
 
 ---
 

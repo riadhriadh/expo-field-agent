@@ -5,5 +5,7 @@ const preset = require('expo-module-scripts/jest-preset-plugin');
 module.exports = {
   ...preset,
   rootDir: __dirname,
-  roots: ['<rootDir>/plugin/src'],
+  // Both halves are tested: the config plugin, and the JS layer's behaviour
+  // when the native module is absent.
+  roots: ['<rootDir>/plugin/src', '<rootDir>/src'],
 };

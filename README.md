@@ -2,7 +2,10 @@
 
 **English** · [Français](README.fr.md) · [العربية](README.ar.md)
 
-> **A development build is required. This package does not work in Expo Go.**
+> **A development build is required for anything to actually happen.**
+>
+> In Expo Go the package **degrades instead of crashing**: every call returns a
+> neutral value, `isAvailable` is `false`, and nothing is tracked, shown or rung.
 >
 > ```bash
 > npx expo prebuild && npx expo run:android
@@ -15,6 +18,52 @@ including on a locked phone.
 
 Android: complete. iOS: what the platform allows and nothing more — the limits
 table below says exactly what is missing, in writing.
+
+---
+
+## Expo Go — degraded, never blocking
+
+The native half cannot exist in Expo Go: Expo Go ships a fixed set of native
+code and yours is not in it. That is a platform fact, and no package changes it.
+
+What this package does about it: **it degrades.** Importing it is safe, and
+every call returns a neutral value instead of throwing, so you can build and
+navigate your screens in Expo Go and keep a development build for the parts that
+need a device.
+
+```ts
+import * as FieldAgent from 'expo-field-agent';
+
+if (!FieldAgent.isAvailable) {
+  // Expo Go: say so in the interface rather than shipping a dead switch.
+}
+```
+
+| Call | In Expo Go |
+|---|---|
+| `isAvailable` | `false` |
+| `getPermissions()` | every key `'unsupported'` |
+| `start()`, `stop()`, `setAuthHeader()`, `setInterval()`, `openSettings()` | resolve, do nothing |
+| `isRunning()` | `false` |
+| `flush()` | `{ sent: 0, queued: 0 }` |
+| `getState()` | `running:false`, `queued:0`, and `lastError` saying why |
+| `showBubble()` | `false` |
+| `triggerAlert()`, `dismissAlert()`, `setAlertSound()`, `setStrings()`, `setBubbleImage()` | resolve, do nothing |
+| `getPendingAlert()` / `getPendingAlertSync()` | `null` |
+| `addListener()` | a subscription that never fires; `.remove()` is safe |
+| `<AlertHost>` | renders nothing |
+
+A single `console.warn` fires the first time a degraded call happens — once, not
+per call, so it stays readable.
+
+**Argument errors still throw, in Expo Go as everywhere.** `triggerAlert({})`
+without a title, `setInterval(0)`, an empty `setBubbleImage('')`: those are bugs
+in your code, not platform limits. Swallowing them here would let them reach
+production unnoticed.
+
+**Do not mistake degradation for support.** Nothing is tracked, no bubble is
+drawn, no alert rings. `isAvailable` is the honest signal — branch your
+interface on it, and put the real testing on a development build.
 
 ---
 
