@@ -21,6 +21,29 @@ tableau des limites est plus bas, écrit noir sur blanc.
 
 ---
 
+## Une application complète qui s'en sert
+
+**[riadhriadh/example-expo-field-agent](https://github.com/riadhriadh/example-expo-field-agent)** — une application chauffeur
+dans l'esprit d'Uber Driver : passage en service, onboarding des permissions,
+bulle qui reflète l'étape, et offre de course en plein écran. Elle a été écrite à
+partir de [docs/prompt-rider-app.md](docs/prompt-rider-app.md), le cahier des
+charges de ce dépôt.
+
+| La bulle par-dessus l'application | La bulle par-dessus l'écran d'accueil |
+|---|---|
+| <img src="https://raw.githubusercontent.com/riadhriadh/expo-field-agent/main/docs/screenshots/rider-online.png" width="240" alt="Application chauffeur en service, la bulle affiche En ligne" /> | <img src="https://raw.githubusercontent.com/riadhriadh/expo-field-agent/main/docs/screenshots/bubble-home.png" width="240" alt="La bulle flottant par-dessus l'ecran d'accueil Android" /> |
+
+À gauche : le chauffeur est en service, le service envoie les positions, la bulle
+est posée sur l'application. À droite : la même bulle **par-dessus le lanceur**,
+application en arrière-plan — c'est précisément ce que JavaScript ne peut pas
+faire, et la raison d'être native de ce paquet.
+
+La carte est éteinte sur ces captures parce qu'aucune clé Google Maps n'est
+configurée ; le suivi en dessous, lui, tourne — d'où les coordonnées qui
+continuent de se mettre à jour.
+
+---
+
 ## Expo Go — dégradé, jamais bloquant
 
 La moitié native ne peut pas exister dans Expo Go : Expo Go embarque un jeu figé

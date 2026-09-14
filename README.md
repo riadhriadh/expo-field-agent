@@ -21,6 +21,28 @@ table below says exactly what is missing, in writing.
 
 ---
 
+## A complete app built on it
+
+**[riadhriadh/example-expo-field-agent](https://github.com/riadhriadh/example-expo-field-agent)** — a driver app in the Uber
+Driver mould: going on duty, the permission onboarding, the bubble reflecting the
+shift state, and the full-screen job offer. It was written from
+[docs/prompt-rider-app.md](docs/prompt-rider-app.md), the brief in this
+repository.
+
+| The bubble over the app | The bubble over the launcher |
+|---|---|
+| <img src="https://raw.githubusercontent.com/riadhriadh/expo-field-agent/main/docs/screenshots/rider-online.png" width="240" alt="Driver app on duty, the bubble showing En ligne" /> | <img src="https://raw.githubusercontent.com/riadhriadh/expo-field-agent/main/docs/screenshots/bubble-home.png" width="240" alt="The bubble floating over the Android home screen" /> |
+
+Left: the driver is on duty, the service is posting positions, and the bubble
+sits over the app. Right: the same bubble **over the launcher**, app in the
+background — that is the part JavaScript cannot do, and the reason this package
+is native.
+
+The map is off in these shots because no Google Maps key is configured; the
+tracking underneath is running, which is why the coordinates keep updating.
+
+---
+
 ## Expo Go — degraded, never blocking
 
 The native half cannot exist in Expo Go: Expo Go ships a fixed set of native

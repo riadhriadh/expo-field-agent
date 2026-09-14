@@ -20,6 +20,26 @@ React Native **من تطبيقك أنت**، حتى والهاتف مقفل.
 
 ---
 
+## تطبيق كامل مبنيّ عليها
+
+**[riadhriadh/example-expo-field-agent](https://github.com/riadhriadh/example-expo-field-agent)** — تطبيق سائق على منوال Uber
+Driver: الدخول في الخدمة، وتهيئة الأذونات، وفقاعة تعكس المرحلة، وعرض مهمّة بملء
+الشاشة. كُتب انطلاقًا من [docs/prompt-rider-app.md](docs/prompt-rider-app.md)،
+وهو كرّاس الشروط الموجود في هذا المستودع.
+
+| الفقاعة فوق التطبيق | الفقاعة فوق شاشة البداية |
+|---|---|
+| <img src="https://raw.githubusercontent.com/riadhriadh/expo-field-agent/main/docs/screenshots/rider-online.png" width="240" alt="تطبيق السائق أثناء الخدمة والفقاعة تعرض En ligne" /> | <img src="https://raw.githubusercontent.com/riadhriadh/expo-field-agent/main/docs/screenshots/bubble-home.png" width="240" alt="الفقاعة تطفو فوق شاشة البداية في أندرويد" /> |
+
+يسارًا: السائق في الخدمة، والخدمة ترسل المواقع، والفقاعة فوق التطبيق. يمينًا:
+الفقاعة نفسها **فوق مشغّل النظام** والتطبيق في الخلفية — وهذا بالضبط ما يعجز عنه
+JavaScript، وهو سبب كون هذه الحزمة أصلية.
+
+الخريطة مطفأة في هاتين اللقطتين لأنّ مفتاح Google Maps غير مضبوط؛ أمّا التتبّع
+تحتها فيعمل، ولذلك تستمرّ الإحداثيات في التحدّث.
+
+---
+
 ## ‏Expo Go — تدهور، لا حجب
 
 النصف الأصلي لا يمكن أن يوجد داخل Expo Go: فهو يحمل مجموعة ثابتة من الكود
