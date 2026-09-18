@@ -363,6 +363,24 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 | `notificationAccess` | **ajout** — l'écran système d'accès aux notifications, utile uniquement au `alert.notificationBridge` optionnel. `unsupported` tant que le pont n'est pas activé. |
 | `autostart` | **ajout** — l'écran de démarrage automatique du constructeur. Aucune API ne le lit : `granted` une fois que l'utilisateur y est passé, `undetermined` avant, `unsupported` sur une marque sans écran connu. |
 
+### Quand la localisation d'arrière-plan disparaît en pleine journée
+
+`backgroundLocation` peut être révoquée alors que le service tourne déjà : un
+réglage basculé à la main, une restauration de sauvegarde, la réinitialisation
+automatique qu'Android applique à une application inutilisée depuis des mois, ou
+un chauffeur qui choisit « Lorsque l'app est active » sur iOS. La plateforme ne
+signale pas ça comme un échec : le fournisseur fusionné cesse simplement de
+livrer des points dès que l'application quitte le premier plan, et iOS efface
+`allowsBackgroundLocationUpdates` tout seul. Aucune exception, aucun rappel,
+aucune erreur — le chauffeur disparaît de la carte, voilà tout.
+
+Les deux plateformes émettent désormais un événement `error` de code
+**`BACKGROUND_LOCATION_LOST`** dès qu'elles s'en aperçoivent, et une seule fois
+tant que la permission ne revient pas. Android vérifie à chaque démarrage du
+service et à chaque battement de cœur ; iOS à chaque changement d'autorisation.
+Traite-le comme bruyant : la journée n'est plus enregistrée, et seul le chauffeur
+peut y remédier depuis les réglages système.
+
 Deux clés en plus du contrat d'origine, parce que sans elles l'alerte et le
 suivi cassent sur Android 14+ et sur MIUI/EMUI/ColorOS **sans rien dire**.
 

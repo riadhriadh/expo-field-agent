@@ -214,6 +214,36 @@ class TrackingService : Service() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    /**
+     * Fine location can stay granted while background location gets revoked
+     * out from under a running service — a manual Settings toggle, a restore,
+     * Android's own auto-reset for an app left unused. Fused then simply stops
+     * delivering fixes once the app is not in the foreground: no exception, no
+     * failure callback, nothing `runCatching` around `requestLocationUpdates`
+     * would ever see. This is the only place positioned to notice at all.
+     */
+    private fun hasBackgroundLocationPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+
+    private var backgroundLocationWarned = false
+
+    /** Checked at every (re)start and every heartbeat — cheap, and the only two
+     *  moments the service does anything on its own regardless of who triggered it. */
+    private fun checkBackgroundLocation() {
+        if (hasBackgroundLocationPermission()) {
+            backgroundLocationWarned = false
+            return
+        }
+        if (backgroundLocationWarned) return
+        backgroundLocationWarned = true
+        Bus.error(
+            "BACKGROUND_LOCATION_LOST",
+            "ACCESS_BACKGROUND_LOCATION n'est plus accordee : le suivi ne captera plus rien ecran eteint."
+        )
+    }
+
     private fun startTracking() {
         if (!hasLocationPermission()) {
             Bus.error("PERMISSION", "ACCESS_FINE_LOCATION manquante : le suivi ne peut pas demarrer.")
@@ -221,6 +251,7 @@ class TrackingService : Service() {
             stopSelf()
             return
         }
+        checkBackgroundLocation()
         started = true
         Prefs.setDesiredRunning(this, true)
         lastMovementAt = System.currentTimeMillis()
@@ -308,6 +339,7 @@ class TrackingService : Service() {
         val runnable = object : Runnable {
             override fun run() {
                 emitHeartbeat()
+                checkBackgroundLocation()
                 main.postDelayed(this, periodMs)
             }
         }

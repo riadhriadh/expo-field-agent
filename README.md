@@ -355,6 +355,22 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 | `notificationAccess` | **addition** — the system notification-access screen, needed only by the opt-in `alert.notificationBridge`. `unsupported` unless you turned the bridge on. |
 | `autostart` | **addition** — the manufacturer's autostart screen. No API reads it: `granted` once the user has been sent there, `undetermined` before, `unsupported` on a brand with no known screen. |
 
+### When background location disappears mid-shift
+
+`backgroundLocation` can be revoked while the service is already running — a
+manual toggle in Settings, a restore from backup, Android's own auto-reset for
+an app left unused for months, or a driver picking "While Using" on iOS. The
+platform does not report this as a failure: fused location simply stops
+delivering fixes once the app leaves the foreground, and iOS clears
+`allowsBackgroundLocationUpdates` on its own. No exception, no callback, no
+error — the driver just vanishes from the map.
+
+Both platforms now emit an `error` event with code **`BACKGROUND_LOCATION_LOST`**
+the moment they notice, and only once until the permission comes back. Android
+checks at every service start and every heartbeat; iOS checks on every
+authorization change. Treat it as loud: the shift is no longer being recorded,
+and only the driver can fix it from system settings.
+
 Two keys beyond the original contract, because without them the alert and the
 tracking break on Android 14+ and on MIUI/EMUI/ColorOS **without saying a word**.
 

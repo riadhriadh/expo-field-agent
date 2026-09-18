@@ -22,6 +22,7 @@ final class FieldAgentTracker: NSObject, CLLocationManagerDelegate {
   private var lastLocation: CLLocation?
   private var heartbeatTimer: Timer?
   private var uploading = false
+  private var backgroundLocationWarned = false
 
   var onPosition: (([String: Any]) -> Void)?
   var onSent: ((Int, Int) -> Void)?
@@ -69,6 +70,9 @@ final class FieldAgentTracker: NSObject, CLLocationManagerDelegate {
       manager.allowsBackgroundLocationUpdates = true
       // The only thing that brings the app back after a termination.
       manager.startMonitoringSignificantLocationChanges()
+      backgroundLocationWarned = false
+    } else {
+      warnBackgroundLocationLost()
     }
     manager.startUpdatingLocation()
     // Same reason as on Android: without this the first point can be minutes
@@ -165,6 +169,30 @@ final class FieldAgentTracker: NSObject, CLLocationManagerDelegate {
     let callback = onAuthorizationChange
     onAuthorizationChange = nil
     callback?()
+
+    guard running else { return }
+    if manager.authorizationStatus == .authorizedAlways {
+      backgroundLocationWarned = false
+      return
+    }
+    // The system clears allowsBackgroundLocationUpdates itself the moment
+    // authorization drops below Always — silently, from the tracker's point
+    // of view. A driver who downgrades to "While Using" in Settings mid-shift
+    // would otherwise vanish from the map with nothing telling anyone why.
+    manager.stopMonitoringSignificantLocationChanges()
+    warnBackgroundLocationLost()
+  }
+
+  /// Covers both entry points: starting with only "While Using" already
+  /// granted, and downgrading to it later while running. Same silence either
+  /// way, so the same one-shot warning.
+  private func warnBackgroundLocationLost() {
+    guard !backgroundLocationWarned else { return }
+    backgroundLocationWarned = true
+    onError?(
+      "BACKGROUND_LOCATION_LOST",
+      "L'autorisation \"Toujours\" n'est pas accordee : le suivi ne captera rien en arriere-plan."
+    )
   }
 
   // MARK: - Delegate
