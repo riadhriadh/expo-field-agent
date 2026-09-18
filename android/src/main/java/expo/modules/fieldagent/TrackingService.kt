@@ -111,6 +111,11 @@ class TrackingService : Service() {
     private lateinit var fused: FusedLocationProviderClient
 
     private var lastAccepted: Geo.Fix? = null
+    // Stamped by this process at ACCEPT time, not read off the fix: location.time
+    // is provider-reported and can freeze/replay/rewind under mock-location
+    // playback without lat/lng ever stopping. This clock is what lets judge()
+    // self-heal after a real 120s no matter what the provider's own clock does.
+    private var lastAcceptedAtMs: Long = 0L
     private var lastSent: Geo.Fix? = null
     private var lastLocation: Location? = null
     private var lastMovementAt = 0L
@@ -370,10 +375,12 @@ class TrackingService : Service() {
 
         // A rejected fix is not an error the user can act on; the rejection is
         // the feature. Nothing is logged either: a position is personal data.
-        if (Geo.judge(lastAccepted, fix) != Geo.Verdict.ACCEPT) return
+        val realElapsedMs = System.currentTimeMillis() - lastAcceptedAtMs
+        if (Geo.judge(lastAccepted, fix, realElapsedMs) != Geo.Verdict.ACCEPT) return
 
         val moved = lastAccepted?.let { Geo.distanceMeters(it, fix) } ?: Double.MAX_VALUE
         lastAccepted = fix
+        lastAcceptedAtMs = System.currentTimeMillis()
         lastLocation = location
         Prefs.putLong(this, Prefs.LAST_FIX_AT, fix.timeMs)
 

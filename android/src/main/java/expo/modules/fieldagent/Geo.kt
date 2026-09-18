@@ -51,12 +51,24 @@ object Geo {
     fun distanceMeters(from: Fix, to: Fix): Double =
         distanceMeters(from.latitude, from.longitude, to.latitude, to.longitude)
 
-    fun judge(previous: Fix?, next: Fix): Verdict {
+    /**
+     * @param realElapsedMsSinceAccepted Wall-clock time this process itself has
+     * measured since [previous] was accepted (0 when there is no previous fix,
+     * where it is unused anyway). [Fix.timeMs] comes from the location
+     * provider and, under mock-location route playback, can freeze, replay, or
+     * run backward while lat/lng keeps changing — starving the tunnel
+     * exemption below and locking an agent frozen until process death. This
+     * clock is stamped by the app itself and cannot be fooled the same way, so
+     * it overrides both the out-of-order guard and the jump guard, not just
+     * one of them.
+     */
+    fun judge(previous: Fix?, next: Fix, realElapsedMsSinceAccepted: Long = 0L): Verdict {
         if (next.latitude !in -90.0..90.0 || next.longitude !in -180.0..180.0) return Verdict.REJECT_COORDINATES
         if (next.latitude.isNaN() || next.longitude.isNaN()) return Verdict.REJECT_COORDINATES
         // A non-positive accuracy means "not reported", which is not the same as "bad".
         if (next.accuracyMeters > MAX_ACCURACY_METERS) return Verdict.REJECT_ACCURACY
         if (previous == null) return Verdict.ACCEPT
+        if (realElapsedMsSinceAccepted >= TUNNEL_GAP_MS) return Verdict.ACCEPT
 
         val elapsedMs = next.timeMs - previous.timeMs
         if (elapsedMs < 0) return Verdict.REJECT_OUT_OF_ORDER

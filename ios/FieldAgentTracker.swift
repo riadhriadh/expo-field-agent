@@ -17,7 +17,7 @@ final class FieldAgentTracker: NSObject, CLLocationManagerDelegate {
   private let uploadQueue = DispatchQueue(label: "expo.fieldagent.upload")
 
   private var running = false
-  private var lastAccepted: (latitude: Double, longitude: Double, time: Date, accuracy: Double)?
+  private var lastAccepted: (latitude: Double, longitude: Double, time: Date, accuracy: Double, acceptedAt: Date)?
   private var lastSent: (latitude: Double, longitude: Double, time: Date)?
   private var lastLocation: CLLocation?
   private var heartbeatTimer: Timer?
@@ -216,8 +216,13 @@ final class FieldAgentTracker: NSObject, CLLocationManagerDelegate {
 
     if !heartbeat, !isPlausible(location) { return }
 
-    lastAccepted = (location.coordinate.latitude, location.coordinate.longitude, time, accuracy)
-    lastLocation = location
+    // A heartbeat replays the same lastLocation on a timer: letting it rewrite
+    // lastAccepted would refresh acceptedAt to "now" every period and starve
+    // the tunnel exemption below forever, exactly the freeze it exists to bound.
+    if !heartbeat {
+      lastAccepted = (location.coordinate.latitude, location.coordinate.longitude, time, accuracy, Date())
+      lastLocation = location
+    }
     UserDefaults.standard.set(time.timeIntervalSince1970 * 1000, forKey: lastFixKey)
 
     let clientId = UUID().uuidString
@@ -246,6 +251,14 @@ final class FieldAgentTracker: NSObject, CLLocationManagerDelegate {
     if accuracy > 100 { return false }
     guard let previous = lastAccepted else { return true }
     let elapsed = location.timestamp.timeIntervalSince(previous.time)
+    // Checked BEFORE the out-of-order guard below, not just the tunnel one:
+    // location.timestamp is CoreLocation's own clock for the fix, not ours, and
+    // a provider clock that is frozen, replayed, OR running BACKWARD must not be
+    // able to starve this exemption by tripping `elapsed < 0` first. Our own
+    // clock at the moment we last accepted a fix always ticks, so the freeze can
+    // never last longer than one real 120s window no matter what the provider
+    // clock does.
+    if Date().timeIntervalSince(previous.acceptedAt) >= 120 { return true }
     if elapsed < 0 { return false }
     // Tunnel exemption: after a long gap the first point back is necessarily far.
     if elapsed >= 120 { return true }

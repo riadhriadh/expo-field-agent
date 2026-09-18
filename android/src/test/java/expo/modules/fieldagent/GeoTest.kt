@@ -73,6 +73,40 @@ class GeoTest {
     }
 
     @Test
+    fun `consecutive rejects for longer than the real elapsed time eventually accept`() {
+        // Mock-location stall: next.timeMs is frozen at the previous fix's stamp,
+        // so the provider-clock tunnel exemption never fires on its own — but the
+        // app's own clock says two real minutes passed, which must still win.
+        val frozen = fix(34.7406, 10.7603, tunis.timeMs)
+        assertEquals(
+            Geo.Verdict.ACCEPT,
+            Geo.judge(tunis, frozen, realElapsedMsSinceAccepted = Geo.TUNNEL_GAP_MS)
+        )
+    }
+
+    @Test
+    fun `a provider clock running backward no longer locks out the exemption`() {
+        // next.timeMs before previous.timeMs (NTP correction, provider handoff)
+        // used to hit REJECT_OUT_OF_ORDER before the tunnel exemption ever ran.
+        val backward = fix(34.7406, 10.7603, tunis.timeMs - 5_000)
+        assertEquals(
+            Geo.Verdict.ACCEPT,
+            Geo.judge(tunis, backward, realElapsedMsSinceAccepted = Geo.TUNNEL_GAP_MS)
+        )
+    }
+
+    @Test
+    fun `a spoofed jump inside a real 120s window is still rejected`() {
+        // The app's own clock has not actually reached 120s yet, so the
+        // exemption must not fire early - otherwise MAX_SPEED_MPS is pointless.
+        val sfax = fix(34.7406, 10.7603, 10_000)
+        assertEquals(
+            Geo.Verdict.REJECT_JUMP,
+            Geo.judge(tunis, sfax, realElapsedMsSinceAccepted = Geo.TUNNEL_GAP_MS - 1)
+        )
+    }
+
+    @Test
     fun `coordinates outside the sphere are rejected`() {
         assertEquals(Geo.Verdict.REJECT_COORDINATES, Geo.judge(null, fix(91.0, 10.0, 0)))
         assertEquals(Geo.Verdict.REJECT_COORDINATES, Geo.judge(null, fix(36.0, 181.0, 0)))
