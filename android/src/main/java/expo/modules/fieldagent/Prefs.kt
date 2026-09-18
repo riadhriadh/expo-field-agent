@@ -32,6 +32,8 @@ object Prefs {
 
     /** Saved before the alert raises the alarm stream, restored after. */
     const val SAVED_ALARM_VOLUME = "saved_alarm_volume"
+    /** Saved before the alert lifts Do Not Disturb, restored after. */
+    const val SAVED_INTERRUPTION_FILTER = "saved_interruption_filter"
     const val ALERT_SOUND_ENABLED = "alert_sound_enabled"
 
     /** Set once the user has been through their manufacturer's autostart screen. */

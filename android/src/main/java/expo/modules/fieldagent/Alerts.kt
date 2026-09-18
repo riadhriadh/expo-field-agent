@@ -441,6 +441,7 @@ object Alerts {
         val audio = context.getSystemService(AudioManager::class.java) ?: return
 
         raiseAlarmVolume(context, audio)
+        overrideDnd(context)
         requestFocus(audio)
 
         val uri = resolveSoundUri(context)
@@ -489,6 +490,7 @@ object Alerts {
             abandonFocus(audio)
             restoreAlarmVolume(context, audio)
         }
+        restoreDnd(context)
     }
 
     /**
@@ -559,6 +561,39 @@ object Alerts {
     }
 
     /**
+     * Raising the alarm stream is not enough on every device: Android's own
+     * "Total silence" Do Not Disturb level, and a few manufacturer skins, mute
+     * the alarm stream at the policy layer regardless of its nominal volume.
+     * Lifting the filter for the ring's duration is the only thing that makes
+     * those devices actually sound — the same permission `setBypassDnd`
+     * already relies on covers this too.
+     */
+    private fun overrideDnd(context: Context) {
+        if (!hasDndAccess(context)) return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val current = manager.currentInterruptionFilter
+        if (current == NotificationManager.INTERRUPTION_FILTER_ALL) return
+
+        val preferences = Prefs.of(context)
+        // Saved to disk, not to a field, for the same reason as the volume: a
+        // process killed mid-alert must not leave Do Not Disturb off forever.
+        if (!preferences.contains(Prefs.SAVED_INTERRUPTION_FILTER)) {
+            preferences.edit().putInt(Prefs.SAVED_INTERRUPTION_FILTER, current).commit()
+        }
+        runCatching { manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
+    }
+
+    private fun restoreDnd(context: Context) {
+        val preferences = Prefs.of(context)
+        if (!preferences.contains(Prefs.SAVED_INTERRUPTION_FILTER)) return
+        val saved = preferences.getInt(Prefs.SAVED_INTERRUPTION_FILTER, NotificationManager.INTERRUPTION_FILTER_ALL)
+        preferences.edit().remove(Prefs.SAVED_INTERRUPTION_FILTER).commit()
+        if (!hasDndAccess(context)) return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        runCatching { manager.setInterruptionFilter(saved) }
+    }
+
+    /**
      * Called at startup. A process that died mid-alert leaves two things behind:
      * the alarm volume pinned at maximum, and a pending alert whose TTL handler
      * died with it. Both are cleaned up here, or the user keeps a stuck
@@ -574,6 +609,7 @@ object Alerts {
             // A live alert owns the volume; leave it alone.
             return
         }
+        restoreDnd(context)
         val audio = context.getSystemService(AudioManager::class.java) ?: return
         restoreAlarmVolume(context, audio)
     }
