@@ -28,9 +28,27 @@ export type PermissionName =
    * itself without ever calling the app. 'unsupported' unless the host turned
    * the bridge on, and always 'unsupported' on iOS.
    */
-  | 'notificationAccess';
+  | 'notificationAccess'
+  /**
+   * SCHEDULE_EXACT_ALARM, for the opt-in `tracking.exactAlarms`. USE_EXACT_ALARM
+   * is never declared: Google Play reserves it for alarm and calendar apps, and
+   * a store rejection is a worse outcome than a watchdog that fires a minute
+   * late. 'unsupported' until the host opts in; once opted in it is 'granted'
+   * below Android 12, where an exact alarm needs no permission at all.
+   */
+  | 'exactAlarm';
 
 export type Permissions = Record<PermissionName, PermissionState>;
+
+export type LogLevel = 'off' | 'error' | 'warn' | 'info' | 'debug';
+
+/** One line of the native log. `at` is Unix milliseconds. */
+export type LogEntry = {
+  at: number;
+  level: Exclude<LogLevel, 'off'>;
+  code: string;
+  message: string;
+};
 
 export type TrackingOptions = {
   /** Overrides `tracking.url` from app.json for this run, and is persisted. */
@@ -42,6 +60,12 @@ export type TrackingOptions = {
   batchSize: number;
   queueSize: number;
   heartbeatSeconds: number;
+  /** Fixes less precise than this are dropped. Android only. */
+  maxAccuracyMeters: number;
+  /** Implicit speed above which two fixes are a GPS jump, not a journey. Android only. */
+  maxSpeedMps: number;
+  /** Drop mock-provider fixes outright. Android only. */
+  rejectMock: boolean;
 };
 
 export type Position = {
@@ -60,6 +84,12 @@ export type Position = {
   clientId: string;
   /** True when the point was emitted by the heartbeat rather than by movement. */
   heartbeat: boolean;
+  /**
+   * True when Android flagged the fix as coming from a mock provider. Kept on
+   * the point rather than filtered out silently, so a server that bills by the
+   * kilometre can decide for itself what to do with a faked trip.
+   */
+  isMock: boolean;
 };
 
 export type TrackingState = {
@@ -68,6 +98,16 @@ export type TrackingState = {
   lastFixAt: number | null;
   lastSentAt: number | null;
   lastError: string | null;
+  /** When that error happened. A message with no date cannot be triaged. */
+  lastErrorAt: number | null;
+  /**
+   * Which acquisition path is running. `'manager'` means the device has no
+   * Google Play Services and fell back to `LocationManager` — the points keep
+   * coming, but with a coarser cadence than the fused provider gives.
+   */
+  provider: 'fused' | 'manager' | 'none';
+  /** The system location switch. False explains an absence of points on its own. */
+  locationEnabled: boolean;
 };
 
 export type FlushResult = { sent: number; queued: number };
@@ -100,6 +140,10 @@ export type FieldAgentStrings = {
   bubbleLabel?: string;
   /** Bubble accessibility sentence; `%s` is replaced by the label. */
   bubbleAccessibility?: string;
+  /** Title of the notification posted when Android refused to resume tracking. */
+  resumeTitle?: string;
+  /** Its body. Say what the user has to do, not what failed. */
+  resumeBody?: string;
 };
 
 export type AlertPayload = {
@@ -137,12 +181,19 @@ export type SentEvent = { count: number; queued: number };
 
 export type ErrorEvent = { code: string; message: string };
 
+/**
+ * The system location switch, or one of its providers, changed. Android only:
+ * iOS has no equivalent broadcast and never emits this.
+ */
+export type ProviderChangeEvent = { enabled: boolean; gps: boolean; network: boolean };
+
 export type FieldAgentEventMap = {
   position: (position: Position) => void;
   sent: (result: SentEvent) => void;
   error: (error: ErrorEvent) => void;
   alert: (alert: AlertPayload) => void;
   bubblePress: () => void;
+  providerChange: (change: ProviderChangeEvent) => void;
 };
 
 export type FieldAgentEventName = keyof FieldAgentEventMap;

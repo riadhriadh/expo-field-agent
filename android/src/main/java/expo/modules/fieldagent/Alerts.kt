@@ -82,6 +82,9 @@ object Alerts {
     const val SERVICE_NOTIFICATION_ID = 0xFA01
     const val ALERT_NOTIFICATION_ID = 0xFA02
 
+    /** Tracking could not start. Posted and cleared by TrackingService. */
+    const val RESUME_NOTIFICATION_ID = 0xFA03
+
     private const val PENDING_ALERT = "pending_alert"
     private const val TORCH_PERIOD_MS = 350L
 
@@ -106,27 +109,40 @@ object Alerts {
     // --- Channels ----------------------------------------------------------
 
     /**
+     * Four channels, not three: the "tracking interrupted" one has to be mutable
+     * on its own. A rider who silences job alerts must not lose, in the same
+     * gesture, the only message telling them their tracking is dead.
+     */
+    private data class Channels(
+        val service: String,
+        val alert: String,
+        val alertSilent: String,
+        val resume: String
+    )
+
+    /**
      * Channel attributes are frozen at creation: importance, sound, vibration
      * and DND bypass are never re-read for a channel that already exists. So the
      * id carries everything that could change, and stale ids are deleted.
      */
-    private fun channelIds(context: Context): Triple<String, String, String> {
+    private fun channelIds(context: Context): Channels {
         val version = Config.get(context).alert.channelVersion
         val bypass = if (hasDndAccess(context)) "_dnd" else ""
-        return Triple(
-            "fa_service_v$version",
-            "fa_alert_v$version$bypass",
-            "fa_alert_silent_v$version"
+        return Channels(
+            service = "fa_service_v$version",
+            alert = "fa_alert_v$version$bypass",
+            alertSilent = "fa_alert_silent_v$version",
+            resume = "fa_resume_v$version"
         )
     }
 
-    private fun ensureChannels(context: Context): Triple<String, String, String> {
+    private fun ensureChannels(context: Context): Channels {
         val ids = channelIds(context)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return ids
 
         val manager = context.getSystemService(NotificationManager::class.java) ?: return ids
         val config = Config.get(context)
-        val keep = setOf(ids.first, ids.second, ids.third)
+        val keep = setOf(ids.service, ids.alert, ids.alertSilent, ids.resume)
 
         // A v1 that shipped a muted channel would condemn every later version
         // until uninstall. Dropping the previous ids is the only way out.
@@ -134,9 +150,9 @@ object Alerts {
             .filter { it.id.startsWith("fa_") && it.id !in keep }
             .forEach { runCatching { manager.deleteNotificationChannel(it.id) } }
 
-        if (manager.getNotificationChannel(ids.first) == null) {
+        if (manager.getNotificationChannel(ids.service) == null) {
             manager.createNotificationChannel(
-                NotificationChannel(ids.first, Strings.serviceChannelName(context), NotificationManager.IMPORTANCE_LOW).apply {
+                NotificationChannel(ids.service, Strings.serviceChannelName(context), NotificationManager.IMPORTANCE_LOW).apply {
                     description = Strings.serviceBody(context)
                     setShowBadge(false)
                     setSound(null, null)
@@ -145,9 +161,21 @@ object Alerts {
             )
         }
 
-        if (manager.getNotificationChannel(ids.second) == null) {
+        // IMPORTANCE_HIGH for the heads-up, no sound: tracking stopping has to be
+        // noticed from a pocket, but it is not a job to accept.
+        if (manager.getNotificationChannel(ids.resume) == null) {
             manager.createNotificationChannel(
-                NotificationChannel(ids.second, Strings.alertChannelName(context), NotificationManager.IMPORTANCE_HIGH).apply {
+                NotificationChannel(ids.resume, Strings.resumeTitle(context), NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = Strings.resumeBody(context)
+                    setSound(null, null)
+                    enableVibration(false)
+                }
+            )
+        }
+
+        if (manager.getNotificationChannel(ids.alert) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(ids.alert, Strings.alertChannelName(context), NotificationManager.IMPORTANCE_HIGH).apply {
                     // The sound is ours: we play it on the alarm stream so it is
                     // audible on silent, which a channel sound never is.
                     setSound(null, null)
@@ -158,10 +186,10 @@ object Alerts {
             )
         }
 
-        if (manager.getNotificationChannel(ids.third) == null) {
+        if (manager.getNotificationChannel(ids.alertSilent) == null) {
             manager.createNotificationChannel(
                 NotificationChannel(
-                    ids.third,
+                    ids.alertSilent,
                     Strings.alertChannelNameSilent(context),
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
@@ -186,12 +214,13 @@ object Alerts {
     private fun renameChannels(
         manager: NotificationManager,
         context: Context,
-        ids: Triple<String, String, String>
+        ids: Channels
     ) {
         val wanted = listOf(
-            ids.first to Strings.serviceChannelName(context),
-            ids.second to Strings.alertChannelName(context),
-            ids.third to Strings.alertChannelNameSilent(context)
+            ids.service to Strings.serviceChannelName(context),
+            ids.alert to Strings.alertChannelName(context),
+            ids.alertSilent to Strings.alertChannelNameSilent(context),
+            ids.resume to Strings.resumeTitle(context)
         )
         for ((id, name) in wanted) {
             val existing = manager.getNotificationChannel(id) ?: continue
@@ -199,8 +228,11 @@ object Alerts {
             runCatching {
                 manager.createNotificationChannel(
                     NotificationChannel(id, name, existing.importance).apply {
-                        description =
-                            if (id == ids.first) Strings.serviceBody(context) else existing.description
+                        description = when (id) {
+                            ids.service -> Strings.serviceBody(context)
+                            ids.resume -> Strings.resumeBody(context)
+                            else -> existing.description
+                        }
                     }
                 )
             }
@@ -337,9 +369,37 @@ object Alerts {
         return context.applicationInfo.icon
     }
 
+    /**
+     * The exact inverse of the service notification: this one says tracking has
+     * stopped. It exists because Android 12 refuses to start a foreground
+     * service from the background, and a silent refusal leaves the rider
+     * convinced they are still being tracked.
+     *
+     * Nothing here is ongoing or silent: it is the only thing that will get
+     * tracking out of the stopped state, and the only gesture that resolves it
+     * is opening the app — a foreground service restarts without refusal from
+     * the foreground, never from an alarm.
+     */
+    fun buildResumeNotification(context: Context): android.app.Notification {
+        val config = Config.get(context)
+        val channelId = ensureChannels(context).resume
+        return NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(smallIcon(context))
+            .setContentTitle(Strings.resumeTitle(context))
+            .setContentText(Strings.resumeBody(context))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(Strings.resumeBody(context)))
+            .setColor(config.notification.color)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(launchAppIntent(context))
+            .build()
+    }
+
     fun buildServiceNotification(context: Context): android.app.Notification {
         val config = Config.get(context)
-        val channelId = ensureChannels(context).first
+        val channelId = ensureChannels(context).service
         return NotificationCompat.Builder(context, channelId)
             .setSmallIcon(smallIcon(context))
             .setContentTitle(Strings.serviceTitle(context))
@@ -366,7 +426,7 @@ object Alerts {
 
     private fun postNotification(context: Context, alert: PendingAlert, sonorous: Boolean) {
         val ids = ensureChannels(context)
-        val channelId = if (sonorous) ids.second else ids.third
+        val channelId = if (sonorous) ids.alert else ids.alertSilent
 
         val fullScreen = PendingIntent.getActivity(
             context,

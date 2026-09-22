@@ -8,24 +8,13 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "android": {
-      "package": "tn.exemple.fieldagent",
-      "compileSdkVersion": 35,
-      "targetSdkVersion": 35,
-      "edgeToEdgeEnabled": true
+      "package": "tn.exemple.fieldagent"
     },
     "ios": {
       "bundleIdentifier": "tn.exemple.fieldagent",
       "supportsTablet": false
     },
     "plugins": [
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "kotlinVersion": "1.9.25"
-          }
-        }
-      ],
       [
         "expo-field-agent",
         {
@@ -37,14 +26,20 @@
             "distanceFilterMeters": 15,
             "batchSize": 50,
             "queueSize": 1000,
-            "heartbeatSeconds": 120
+            "heartbeatSeconds": 120,
+            "maxAccuracyMeters": 100,
+            "maxSpeedMps": 60,
+            "rejectMock": false,
+            "exactAlarms": true
           },
           "notification": {
             "channelName": "Suivi en service",
             "title": "En service",
             "body": "Ta position est partagee pendant tes courses.",
             "icon": "./assets/notif.png",
-            "color": "#FF6B2C"
+            "color": "#FF6B2C",
+            "resumeTitle": "Suivi interrompu",
+            "resumeBody": "Android a refuse de relancer le suivi. Ouvre l'application pour reprendre."
           },
           "alert": {
             "titlePattern": "Nouvelle course",
@@ -62,7 +57,9 @@
               "warn": "#F5A623",
               "bad": "#E5484D"
             }
-          }
+          },
+          "logLevel": "debug",
+          "logMaxDays": 7
         }
       ]
     ]

@@ -16,7 +16,10 @@ public class FieldAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("FieldAgent")
 
-    Events("position", "sent", "error", "alert", "bubblePress")
+    // providerChange is declared but never emitted here: iOS has no equivalent
+    // of PROVIDERS_CHANGED. Declaring it anyway keeps addListener from attaching
+    // to an event the module does not know, which throws rather than degrades.
+    Events("position", "sent", "error", "alert", "bubblePress", "providerChange")
 
     OnCreate {
       self.tracker.onPosition = { [weak self] payload in self?.sendEvent("position", payload) }
@@ -98,6 +101,23 @@ public class FieldAgentModule: Module {
     }
 
     AsyncFunction("getState") { () -> [String: Any] in self.tracker.state() }
+
+    // MARK: Diagnostics and odometer — Android-only, declared so they degrade
+    //
+    // These have no iOS implementation, but they must still EXIST. On a real iOS
+    // build the native module is present, so the JS layer's Expo Go guard does
+    // not fire: calling a function the module never declared rejects the promise,
+    // and this package promises a neutral value instead of an exception.
+
+    AsyncFunction("getLog") { (_: Int, _: Double) -> [[String: Any]] in [] }
+
+    AsyncFunction("clearLog") { () -> Void in }
+
+    AsyncFunction("exportLog") { () -> String? in nil }
+
+    AsyncFunction("getOdometer") { () -> Double in 0 }
+
+    AsyncFunction("resetOdometer") { () -> Void in }
 
     // MARK: Bubble — no such thing on iOS, and there never will be
 

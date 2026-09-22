@@ -22,6 +22,23 @@ object Prefs {
     const val LAST_SENT_AT = "last_sent_at"
     const val LAST_ERROR = "last_error"
 
+    /**
+     * When LAST_ERROR happened. Without it, an error from three days ago and one
+     * from three seconds ago read the same, and a later success wipes the trace
+     * of the outage before anyone could date it.
+     */
+    const val LAST_ERROR_AT = "last_error_at"
+
+    /** Native odometer, in centimetres, accumulated only over fixes Geo kept. */
+    const val ODOMETER_METERS = "odometer_meters"
+
+    /**
+     * setIntervalSeconds survives a service restart. Held in process memory, the
+     * cadence the host chose vanished on the first kill — exactly when nobody is
+     * around to ask for it again.
+     */
+    const val INTERVAL_OVERRIDE = "interval_override"
+
     const val BUBBLE_VISIBLE = "bubble_visible"
     const val BUBBLE_X = "bubble_x"
     const val BUBBLE_Y = "bubble_y"

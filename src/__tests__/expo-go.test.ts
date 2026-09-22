@@ -25,6 +25,7 @@ jest.mock('react-native', () => ({
 jest.mock('../AlertHost', () => ({ AlertHost: () => null }));
 
 import * as FieldAgent from '../index';
+import type { PermissionName } from '../types';
 
 describe('sans module natif (Expo Go)', () => {
   beforeEach(() => {
@@ -60,6 +61,11 @@ describe('sans module natif (Expo Go)', () => {
     await expect(FieldAgent.flush()).resolves.toEqual({ sent: 0, queued: 0 });
     await expect(FieldAgent.getPendingAlert()).resolves.toBeNull();
     expect(FieldAgent.getPendingAlertSync()).toBeNull();
+    await expect(FieldAgent.getLog()).resolves.toEqual([]);
+    await expect(FieldAgent.clearLog()).resolves.toBeUndefined();
+    await expect(FieldAgent.exportLog()).resolves.toBeNull();
+    await expect(FieldAgent.getOdometer()).resolves.toBe(0);
+    await expect(FieldAgent.resetOdometer()).resolves.toBeUndefined();
   });
 
   it('dit pourquoi dans getState, pour que l ecran de diagnostic le montre', async () => {
@@ -67,18 +73,39 @@ describe('sans module natif (Expo Go)', () => {
     expect(state.running).toBe(false);
     expect(state.queued).toBe(0);
     expect(state.lastError).toMatch(/Expo Go/);
+    expect(state.lastErrorAt).toBeNull();
+    expect(state.provider).toBe('none');
+    expect(state.locationEnabled).toBe(false);
   });
 
-  it('rend les huit permissions unsupported plutot que de les inventer', async () => {
+  // Le titre disait « les huit permissions » alors qu il y en avait neuf : un
+  // compte ecrit a la main vieillit en silence. Cette table est typee
+  // `Record<PermissionName, true>`, donc elle cesse de compiler quand une
+  // permission apparait, et le test echoue quand Expo Go en oublie une.
+  const EVERY_PERMISSION: Record<PermissionName, true> = {
+    location: true,
+    backgroundLocation: true,
+    notifications: true,
+    overlay: true,
+    batteryUnrestricted: true,
+    dndAccess: true,
+    fullScreenIntent: true,
+    autostart: true,
+    notificationAccess: true,
+    exactAlarm: true,
+  };
+
+  it('rend toutes les permissions du type unsupported plutot que de les inventer', async () => {
     const permissions = await FieldAgent.getPermissions();
+    expect(Object.keys(permissions).sort()).toEqual(Object.keys(EVERY_PERMISSION).sort());
     expect(Object.values(permissions).every((value) => value === 'unsupported')).toBe(true);
-    expect(permissions.location).toBe('unsupported');
-    expect(permissions.notificationAccess).toBe('unsupported');
   });
 
   it('rend un abonnement qu on peut retirer sans precaution', () => {
     const subscription = FieldAgent.addListener('position', () => undefined);
     expect(() => subscription.remove()).not.toThrow();
+    const providers = FieldAgent.addListener('providerChange', () => undefined);
+    expect(() => providers.remove()).not.toThrow();
   });
 
   it('avertit une seule fois, pas a chaque appel', async () => {
@@ -86,6 +113,11 @@ describe('sans module natif (Expo Go)', () => {
     await FieldAgent.stop();
     await FieldAgent.stop();
     await FieldAgent.flush();
+    await FieldAgent.getLog();
+    await FieldAgent.clearLog();
+    await FieldAgent.exportLog();
+    await FieldAgent.getOdometer();
+    await FieldAgent.resetOdometer();
     // Le module a deja averti dans un test precedent : ce qui compte est qu il
     // n inonde pas la console, pas le compte exact a partir d ici.
     expect(warn.mock.calls.length).toBeLessThanOrEqual(1);
@@ -97,5 +129,16 @@ describe('sans module natif (Expo Go)', () => {
     await expect(FieldAgent.triggerAlert({ title: '' })).rejects.toThrow(/title/);
     await expect(FieldAgent.setInterval(0)).rejects.toThrow(/secondes/);
     await expect(FieldAgent.setBubbleImage('')).rejects.toThrow();
+  });
+
+  it('refuse un limit ou un sinceMs invalides meme sans natif', async () => {
+    // Le piege que la regle 3 existe pour eviter : rendre [] ici laisserait un
+    // appel fautif passer inapercu jusqu au build natif.
+    await expect(FieldAgent.getLog({ limit: 0 })).rejects.toThrow(/limit/);
+    await expect(FieldAgent.getLog({ limit: -1 })).rejects.toThrow(/limit/);
+    await expect(FieldAgent.getLog({ limit: 1.5 })).rejects.toThrow(/limit/);
+    await expect(FieldAgent.getLog({ sinceMs: -1 })).rejects.toThrow(/sinceMs/);
+    await expect(FieldAgent.getLog({ sinceMs: Number.NaN })).rejects.toThrow(/sinceMs/);
+    await expect(FieldAgent.getLog({ sinceMs: Number.POSITIVE_INFINITY })).rejects.toThrow(/sinceMs/);
   });
 });

@@ -25,6 +25,9 @@ android {
     // Geo and Queue are pure JVM; this keeps the android.* stubs they never
     // touch from throwing instead of returning defaults.
     unitTests.returnDefaultValues = true
+    // Robolectric refuses to stand up a Context without the merged resources,
+    // and the SQLite half of Log cannot be tested any other way off-device.
+    unitTests.includeAndroidResources = true
   }
 
   lintOptions {
@@ -44,4 +47,10 @@ dependencies {
   implementation "com.google.android.gms:play-services-location:21.3.0"
 
   testImplementation "junit:junit:4.13.2"
+
+  // Log stores into SQLite, which the android.jar stub cannot return a default
+  // for. Robolectric runs the real database code, so the rotation and the hard
+  // cap are actually exercised instead of mocked into always passing.
+  testImplementation "org.robolectric:robolectric:4.15.1"
+  testImplementation "androidx.test:core:1.7.0"
 }

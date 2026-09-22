@@ -25,6 +25,18 @@ export type TrackingProps = {
    * judges freshness declares the agent missing.
    */
   heartbeatSeconds?: number;
+  /**
+   * Opts the app into SCHEDULE_EXACT_ALARM for the watchdog. Off by default:
+   * the permission is user-grantable but still draws Play scrutiny, and an
+   * inexact alarm is enough as long as the service is alive.
+   */
+  exactAlarms?: boolean;
+  /** Above this, a fix is noise and gets dropped before it reaches the queue. */
+  maxAccuracyMeters?: number;
+  /** Above this, the jump is a teleport: a bad fix, not a vehicle. */
+  maxSpeedMps?: number;
+  /** Drops fixes flagged as mock. Only worth it when the trace is contractual. */
+  rejectMock?: boolean;
 };
 
 export type NotificationProps = {
@@ -34,6 +46,13 @@ export type NotificationProps = {
   /** Monochrome 24dp PNG with alpha. Anything else renders as a white square. */
   icon?: string;
   color?: string;
+  /**
+   * Shown when Android refused to bring the service back. It is the opposite of
+   * the ongoing notification: it announces that nothing is being tracked, so it
+   * must never reuse `title` / `body`.
+   */
+  resumeTitle?: string;
+  resumeBody?: string;
 };
 
 export type AlertProps = {
@@ -81,6 +100,10 @@ export type IosProps = {
   criticalAlerts?: boolean;
 };
 
+export const LOG_LEVELS = ['off', 'error', 'warn', 'info', 'debug'] as const;
+
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
 export type FieldAgentPluginProps = {
   tracking?: TrackingProps;
   notification?: NotificationProps;
@@ -93,6 +116,13 @@ export type FieldAgentPluginProps = {
    * something else yourself.
    */
   rootComponent?: string;
+  /**
+   * Severity kept in the on-device log. `error` by default: a log that records
+   * every fix is a log nobody reads and a database that grows on its own.
+   */
+  logLevel?: LogLevel;
+  /** Days of log kept. Older rows are dropped on the next write. */
+  logMaxDays?: number;
 };
 
 export type ResolvedProps = {
@@ -105,6 +135,10 @@ export type ResolvedProps = {
     batchSize: number;
     queueSize: number;
     heartbeatSeconds: number;
+    exactAlarms: boolean;
+    maxAccuracyMeters: number;
+    maxSpeedMps: number;
+    rejectMock: boolean;
   };
   notification: {
     channelName: string;
@@ -112,6 +146,8 @@ export type ResolvedProps = {
     body: string;
     icon: string | null;
     color: string;
+    resumeTitle: string;
+    resumeBody: string;
   };
   alert: {
     titlePattern: string;
@@ -136,6 +172,8 @@ export type ResolvedProps = {
     criticalAlerts: boolean;
   };
   rootComponent: string;
+  logLevel: LogLevel;
+  logMaxDays: number;
 };
 
 const TAG = '[expo-field-agent]';
@@ -176,6 +214,19 @@ function bool(value: unknown, fallback: boolean, key: string): boolean {
     return fallback;
   }
   return value;
+}
+
+/** The accepted list goes in the warning: the enum lives in the native code, not in reach. */
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T, key: string): T {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
+    warn(
+      key + ' doit valoir ' + allowed.join(' | ') + ', recu ' + JSON.stringify(value) +
+        ' — defaut "' + fallback + '" utilise.'
+    );
+    return fallback;
+  }
+  return value as T;
 }
 
 /**
@@ -261,7 +312,54 @@ function asset(value: unknown, key: string, projectRoot: string, extensions: str
   return value;
 }
 
-const KNOWN_ROOTS = ['tracking', 'notification', 'alert', 'bubble', 'ios', 'rootComponent'];
+const KNOWN_ROOTS = [
+  'tracking',
+  'notification',
+  'alert',
+  'bubble',
+  'ios',
+  'rootComponent',
+  'logLevel',
+  'logMaxDays',
+];
+
+/**
+ * A typo one level down used to resolve to the default in complete silence, and
+ * "the key does nothing" is indistinguishable from "the feature is broken" from
+ * the host's chair. Checking here costs one list per namespace; nowhere else in
+ * the chain still knows which keys were written by hand.
+ */
+const KNOWN_KEYS: Record<string, string[]> = {
+  tracking: [
+    'url',
+    'batchUrl',
+    'intervalSeconds',
+    'idleIntervalSeconds',
+    'distanceFilterMeters',
+    'batchSize',
+    'queueSize',
+    'heartbeatSeconds',
+    'exactAlarms',
+    'maxAccuracyMeters',
+    'maxSpeedMps',
+    'rejectMock',
+  ],
+  notification: ['channelName', 'title', 'body', 'icon', 'color', 'resumeTitle', 'resumeBody'],
+  alert: [
+    'titlePattern',
+    'sound',
+    'channelName',
+    'route',
+    'ttlSeconds',
+    'torch',
+    'forceVolume',
+    'volumeLevel',
+    'channelVersion',
+    'notificationBridge',
+  ],
+  bubble: ['icon', 'label', 'colors'],
+  ios: ['locationWhenInUsePermission', 'locationAlwaysPermission', 'criticalAlerts'],
+};
 
 export const SOUND_EXTENSIONS = ['wav', 'mp3', 'ogg', 'm4a', 'aac'];
 
@@ -271,6 +369,16 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
   for (const key of Object.keys(props)) {
     if (!KNOWN_ROOTS.includes(key)) {
       warn('cle inconnue "' + key + '" dans la configuration du plugin — ignoree.');
+    }
+  }
+
+  for (const [namespace, known] of Object.entries(KNOWN_KEYS)) {
+    const section = (props as Record<string, unknown>)[namespace];
+    if (typeof section !== 'object' || section === null) continue;
+    for (const key of Object.keys(section)) {
+      if (!known.includes(key)) {
+        warn('cle inconnue "' + namespace + '.' + key + '" dans la configuration du plugin — ignoree.');
+      }
     }
   }
 
@@ -324,6 +432,10 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
         'tracking.heartbeatSeconds',
         30
       ),
+      exactAlarms: bool(tracking.exactAlarms, false, 'tracking.exactAlarms'),
+      maxAccuracyMeters: num(tracking.maxAccuracyMeters, 100, 'tracking.maxAccuracyMeters', 1),
+      maxSpeedMps: num(tracking.maxSpeedMps, 60, 'tracking.maxSpeedMps', 1),
+      rejectMock: bool(tracking.rejectMock, false, 'tracking.rejectMock'),
     },
     notification: {
       channelName: str(notification.channelName, 'Suivi en service', 'notification.channelName'),
@@ -331,6 +443,12 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
       body: str(notification.body, 'Ta position est partagee pendant tes courses.', 'notification.body'),
       icon: asset(notification.icon, 'notification.icon', projectRoot, ['png']),
       color: color(notification.color, '#FF6B2C', 'notification.color'),
+      resumeTitle: str(notification.resumeTitle, 'Suivi interrompu', 'notification.resumeTitle'),
+      resumeBody: str(
+        notification.resumeBody,
+        "Android a refuse de relancer le suivi. Ouvre l'application pour reprendre.",
+        'notification.resumeBody'
+      ),
     },
     alert: {
       titlePattern,
@@ -368,6 +486,8 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
       criticalAlerts: bool(ios.criticalAlerts, false, 'ios.criticalAlerts'),
     },
     rootComponent: str(props.rootComponent, 'main', 'rootComponent'),
+    logLevel: oneOf(props.logLevel, LOG_LEVELS, 'error', 'logLevel'),
+    logMaxDays: num(props.logMaxDays, 7, 'logMaxDays', 1),
   };
 }
 
@@ -401,5 +521,7 @@ export function serializeForNative(props: ResolvedProps, soundExtension: string 
     },
     bubble: { ...props.bubble, icon: props.bubble.icon ? ANDROID_RESOURCES.bubbleIcon : null },
     rootComponent: props.rootComponent,
+    logLevel: props.logLevel,
+    logMaxDays: props.logMaxDays,
   });
 }

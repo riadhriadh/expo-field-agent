@@ -104,6 +104,7 @@ object Outbox {
 
         val remaining = outbox.size()
         if (sent > 0) {
+            Bus.debug("UPLINK", "$sent point(s) envoye(s), $remaining en attente")
             Bus.emit("sent", Bundle().apply {
                 putInt("count", sent)
                 putInt("queued", remaining)

@@ -70,7 +70,11 @@ if (!FieldAgent.isAvailable) {
 | `start()`, `stop()`, `setAuthHeader()`, `setInterval()`, `openSettings()` | se résolvent, ne font rien |
 | `isRunning()` | `false` |
 | `flush()` | `{ sent: 0, queued: 0 }` |
-| `getState()` | `running:false`, `queued:0`, et `lastError` qui dit pourquoi |
+| `getState()` | `running:false`, `queued:0`, `provider:'none'`, `locationEnabled:false`, et `lastError` qui dit pourquoi |
+| `getLog()` | `[]` |
+| `exportLog()` | `null` |
+| `getOdometer()` | `0` |
+| `clearLog()`, `resetOdometer()` | se résolvent, ne font rien |
 | `showBubble()` | `false` |
 | `triggerAlert()`, `dismissAlert()`, `setAlertSound()`, `setStrings()`, `setBubbleImage()` | se résolvent, ne font rien |
 | `getPendingAlert()` / `getPendingAlertSync()` | `null` |
@@ -138,6 +142,348 @@ faire :
 
 **Zéro fichier natif à toucher chez toi.** Tout ce qui précède est installé par
 le config plugin, depuis `app.json`.
+
+---
+
+## De zéro à une application qui suit — le pas à pas
+
+Le chemin complet : dossier vide d'un côté, téléphone qui envoie sa position
+écran éteint de l'autre. Chaque commande, chaque clé et chaque valeur de retour
+ci-dessous sort du code de ce dépôt.
+
+### 0. Expo Go ne fera pas tourner ça — commence par là
+
+**Ce module ne peut pas tourner dans Expo Go.** Expo Go embarque un jeu figé de
+code natif, et `expo.modules.fieldagent.*` n'en fait pas partie. Il faut un
+**development build** — une application native que tu compiles toi-même. Les
+étapes 4 et 5 ne sont donc pas du confort : sans elles, rien ne se passe.
+
+Ce qui arrive quand même dans Expo Go : ça dégrade, ça ne plante pas.
+`FieldAgent.isAvailable` vaut `false`, chaque appel rend une valeur neutre, et
+un seul `console.warn` part au premier appel dégradé — le tableau complet est
+plus haut, dans « Expo Go — dégradé, jamais bloquant ». Les erreurs d'argument,
+elles, lèvent quand même : ce sont tes bugs, pas des limites de plateforme.
+
+Branche ton interface sur `FieldAgent.isAvailable`. Un interrupteur mort est
+pire qu'un bandeau « suivi indisponible ».
+
+### 1. Créer l'application
+
+```bash
+npx create-expo-app@latest mon-app-terrain --template blank-typescript
+cd mon-app-terrain
+```
+
+### 2. Installer le module
+
+```bash
+npx expo install expo-field-agent
+```
+
+La pile contre laquelle ce pas à pas est écrit — celle des `devDependencies` de
+ce dépôt, donc celle contre laquelle le module est **développé et testé** :
+
+| Paquet | Version |
+|---|---|
+| `expo` | `^57.0.24` |
+| `react` | `19.2.3` |
+| `react-native` | `0.86.3` |
+| `@types/react` | `~19.2.0` |
+| `typescript` | `^5.9.3` |
+| `babel-preset-expo` | `^57.0.12` |
+| `expo-module-scripts` | `^56.0.3` |
+
+**Le SDK 57 n'est pas exigé.** Les `peerDependencies` du module disent
+`"expo": ">=52.0.0"`, `"react": "*"`, `"react-native": "*"` : les hôtes plus
+anciens, à partir du SDK 52, restent pris en charge. 57 est simplement la
+version sur laquelle il est construit.
+
+Facultatif, seulement si tu veux le lanceur du menu développeur :
+
+```bash
+npx expo install expo-dev-client
+```
+
+L'application `example/` ne le liste pas, alors même que son script de démarrage
+est `expo start --dev-client` : `npx expo run:android` produit déjà à lui seul un
+build de debug qui fonctionne.
+
+### 3. Configurer `app.json`
+
+Le bloc minimal qui marche vraiment :
+
+```json
+{
+  "expo": {
+    "name": "Mon App Terrain",
+    "slug": "mon-app-terrain",
+    "scheme": "monappterrain",
+    "android": { "package": "com.exemple.monappterrain" },
+    "ios": { "bundleIdentifier": "com.exemple.monappterrain" },
+    "plugins": [
+      [
+        "expo-field-agent",
+        {
+          "tracking": {
+            "url": "https://api.exemple.tn/api/positions"
+          },
+          "notification": {
+            "title": "En service",
+            "body": "Ta position est partagée pendant tes courses."
+          },
+          "ios": {
+            "locationWhenInUsePermission": "Ta position sert à t'affecter les courses proches.",
+            "locationAlwaysPermission": "Ta position continue à être partagée pendant tes courses, même application fermée."
+          }
+        }
+      ]
+    ]
+  }
+}
+```
+
+C'est vraiment tout ce qu'il faut. `["expo-field-agent"]`, sans le moindre objet
+d'options, installe le plugin en entier lui aussi — **chaque clé a un défaut**,
+et la liste complète est juste en dessous, dans « Installation ». La seule qui ne
+peut pas en avoir est `tracking.url` : donne-la ici, ou à chaud avec
+`start({ url })`. Sans l'une ni l'autre, `start()` lève.
+
+Les défauts de `notification.*` et des deux phrases `ios.*` sont **en français**.
+Si ton application parle une autre langue, écris-les ici — sinon tes
+utilisateurs lisent du français.
+
+**Ne recopie pas tout d'`example/app.json`.** C'est une configuration de
+démonstration : `tracking.url` pointe sur `https://httpbin.org/post`,
+`tracking.exactAlarms` y vaut `true` — donc `SCHEDULE_EXACT_ALARM` dans ton
+manifeste, et une revue Play que tu n'as peut-être pas à subir —, `alert.torch`
+est activé et `logLevel` est à `debug`, qui écrit une ligne par événement. Sur la
+pile ci-dessus, le bloc minimal plus haut suffit.
+
+Une valeur malformée ne fait **jamais** échouer le build : elle imprime un
+`[expo-field-agent] …` sur la sortie d'erreur et le défaut s'applique. Une clé
+inconnue, à la racine comme un niveau plus bas, est signalée puis ignorée
+(`cle inconnue "tracking.intervalSecondes"…`). Une faute de frappe silencieuse
+ressemble exactement à une fonctionnalité cassée — lis la sortie du prebuild.
+
+### 4. `prebuild` — obligatoire, pas optionnel
+
+```bash
+npx expo prebuild --clean
+```
+
+`expo-field-agent` est un **config plugin plus du code natif**. Tout ce dont il a
+besoin vit dans des fichiers de projet natifs qui n'existent pas avant le
+prebuild.
+
+Côté Android, `android/app/src/main/AndroidManifest.xml` reçoit 14
+`<uses-permission>` — `INTERNET`, `ACCESS_NETWORK_STATE`,
+`ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `ACCESS_BACKGROUND_LOCATION`,
+`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS`,
+`SYSTEM_ALERT_WINDOW`, `USE_FULL_SCREEN_INTENT`, `ACCESS_NOTIFICATION_POLICY`,
+`RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`, `VIBRATE`, plus `SCHEDULE_EXACT_ALARM` si
+et seulement si `tracking.exactAlarms: true` —, le service `TrackingService` en
+`foregroundServiceType="location"` et `stopWithTask="false"`, les receivers
+`BootReceiver`, `WatchdogReceiver`, `AlertActionReceiver` et
+`ProvidersChangedReceiver`, l'activité `AlertActivity` en `showWhenLocked` /
+`turnScreenOn` / `excludeFromRecents`, une `<meta-data>`
+`expo.modules.fieldagent.CONFIG` qui porte toute la configuration résolue en un
+seul blob JSON, et ton `alert.sound` copié dans
+`res/raw/field_agent_alert.<ext>` avec `noCompress` ajouté à `app/build.gradle`.
+
+Côté iOS, `ios/<Projet>/Info.plist` reçoit `UIBackgroundModes: ["location"]`, les
+trois `NSLocation*UsageDescription` et un dictionnaire `EXFieldAgent` que lit le
+code Swift ; le son est copié en `FieldAgentAlert.<ext>` et ajouté aux Copy
+Bundle Resources.
+
+Rien de tout ça n'est joignable depuis JavaScript. C'est toute la raison d'être
+native du module.
+
+**Refais un prebuild après chaque changement de plugin dans `app.json`.**
+`expo prebuild` réutilise un dossier `android/` existant : *ne pas écrire* un
+nœud n'est pas la même chose que *le retirer*. Le plugin retire activement ce
+dont il n'a plus besoin (`remove()` / `removePermission()`), mais seulement si le
+prebuild tourne. Désactiver `exactAlarms` ou `notificationBridge` sans refaire un
+prebuild, c'est continuer à livrer exactement ce que tu viens de désactiver.
+
+### 5. Lancer sur un vrai téléphone
+
+```bash
+npx expo run:android          # compile, installe, démarre Metro
+```
+
+```bash
+npx expo run:ios
+```
+
+Sur les machines Homebrew en Ruby 3.4, CocoaPods 1.16 casse si la locale n'est
+pas UTF-8 (`Unicode Normalization not appropriate for ASCII-8BIT`) — rien à voir
+avec ce module non plus : `LANG=en_US.UTF-8 npx expo run:ios`.
+
+**Un vrai téléphone, pas un émulateur**, pour tout essai qui compte. Un émulateur
+Android ne produit que des positions **simulées** : avec
+`tracking.rejectMock: true`, chaque point est rejeté, une seule `error` de code
+`MOCK_LOCATION` part, et l'application a l'air de tourner alors que la file reste
+vide et que rien n'est jamais envoyé. Le défaut est `false` — garde-le sur
+émulateur. Et un émulateur n'a ni Doze réel ni tueur de tâches constructeur.
+
+Dernier piège de cette étape : une URL en `http://` fonctionne depuis
+`expo run:android` et meurt en release. C'est le gabarit de prebuild d'Expo qui
+pose `usesCleartextTraffic="true"` dans le seul
+`android/app/src/debug/AndroidManifest.xml` ; le module n'en déclare nulle part.
+Utilise `https://`, ou écris ta propre network security config pour ta machine
+de dev.
+
+### 6. L'application minimale qui suit vraiment
+
+Les permissions dans l'ordre imposé, `start()`, les points qui arrivent,
+`stop()` :
+
+```tsx
+import { useEffect, useState } from 'react';
+import { Button, Text, View } from 'react-native';
+import * as FieldAgent from 'expo-field-agent';
+
+// Les écrans de réglages : à demander plus tard, à un moment calme, jamais à l'inscription.
+const ECRANS = ['overlay', 'dndAccess', 'fullScreenIntent', 'batteryUnrestricted', 'autostart'] as const;
+
+// Ton écran d'explication, exigé par Google Play avant la demande d'arrière-plan.
+// Plein texte, tes mots : « à l'écran suivant, choisis Localisation > Toujours autoriser ».
+async function montrerLExplication() { /* se résout quand l'utilisateur tape « Continuer » */ }
+
+export default function App() {
+  const [point, setPoint] = useState('aucun point');
+  const [enService, setEnService] = useState(false);
+
+  useEffect(() => {
+    const pos = FieldAgent.addListener('position', (p) =>
+      setPoint(`${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`));
+    const err = FieldAgent.addListener('error', (e) => console.warn(e.code, e.message));
+    return () => { pos.remove(); err.remove(); };
+  }, []);
+
+  async function prendreService() {
+    // 1. Premier plan seulement : la boîte de dialogue de localisation, puis celle des notifications.
+    let perms = await FieldAgent.requestPermissions({ skip: ['backgroundLocation', ...ECRANS] });
+    if (perms.location !== 'granted') return;   // rien d'autre ne vaut la peine d'être demandé
+
+    // 2. Ton écran à toi, avant d'envoyer l'utilisateur dans les Réglages d'Android.
+    await montrerLExplication();
+
+    // 3. Arrière-plan seulement. Sur Android 11+ c'est la fiche de l'application qui s'ouvre,
+    //    pas une boîte de dialogue : l'appel se résout quand l'utilisateur revient.
+    perms = await FieldAgent.requestPermissions({ skip: ['location', 'notifications', ...ECRANS] });
+    if (perms.backgroundLocation !== 'granted') {
+      await FieldAgent.openSettings('backgroundLocation');   // même fiche, en raccourci
+    }
+
+    await FieldAgent.setAuthHeader('Bearer …');   // chiffré : Keystore sur Android, Keychain sur iOS
+    try {
+      await FieldAgent.start();                   // ou start({ url }) pour surcharger app.json
+      setEnService(true);
+    } catch (e) {
+      console.warn('start a été refusé :', e);    // les trois cas sont juste en dessous
+    }
+  }
+
+  async function quitterService() {
+    await FieldAgent.stop();                      // stop() ne lève pas
+    setEnService(false);
+  }
+
+  if (!FieldAgent.isAvailable) {
+    return <Text>Suivi indisponible : il faut un development build.</Text>;
+  }
+
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', gap: 12, padding: 24 }}>
+      <Text>{point}</Text>
+      <Button
+        title={enService ? 'Quitter le service' : 'Prendre le service'}
+        onPress={enService ? quitterService : prendreService}
+      />
+    </View>
+  );
+}
+```
+
+**Pourquoi deux appels à `requestPermissions()`.** L'appel sans `skip` déroule
+toute l'échelle d'un coup : localisation, notifications, arrière-plan, puis les
+écrans de réglages. Or sur **Android 11+ aucune boîte de dialogue ne peut
+accorder la localisation d'arrière-plan** : le module ouvre la fiche
+*Informations sur l'application*, et l'utilisateur doit y taper lui-même
+**Autorisations → Localisation → Toujours autoriser**. Enchaîner directement,
+c'est le laisser tomber dans un écran système sans savoir pourquoi — et Google
+Play exige une explication préalable. D'où la coupure en deux, et d'où
+l'explication en toutes lettres à l'étape 2. Sur l'API 29 exactement, une vraie
+boîte de dialogue existe encore et peut rendre `granted` directement.
+
+L'échelle est idempotente : ce qui est déjà `granted` est sauté, donc rappeler
+`requestPermissions()` après un accord partiel ne redemande que ce qui manque.
+Et distingue `'undetermined'` de `'denied'` : `'denied'` n'apparaît qu'après une
+première demande, donc brancher un raccourci vers les Réglages sur
+`!== 'granted'` envoie un nouvel utilisateur dans les Réglages au lieu de lui
+montrer la boîte de dialogue.
+
+**`start()` lève, et il faut le montrer.** Trois cas distincts : `tracking.url`
+absente, `ACCESS_FINE_LOCATION` non accordée, et **Android qui refuse un
+démarrage depuis l'arrière-plan**. Le troisième est le seul qui n'est pas de ta
+faute : une `error` de code `SERVICE_START` part, une notification « suivi
+interrompu » s'affiche sur son propre canal, la promesse est rejetée — mais
+l'intention reste persistée, donc le receiver de boot, le watchdog toutes les
+~15 min et le retour au premier plan la reprennent tout seuls. Affiche-le, ne le
+traite pas comme définitif.
+
+### 7. Vérifier que le service tourne pour de bon
+
+```bash
+adb shell dumpsys activity services <ton.package> | grep isForeground   # attendu : isForeground=true
+```
+
+Le module n'écrit **rien dans logcat** : son journal part dans une base SQLite
+que le service tient lui-même, justement pour survivre au kill. Lis-le depuis
+l'application avec `getLog()`, ou sors-le en fichier avec `exportLog()` — la
+section « Le journal natif » plus bas détaille les deux.
+
+La section « Vérifier — un scénario, une commande » plus bas déroule les douze
+scénarios, tous exécutables depuis l'application `example/`.
+
+### Et sur iOS — ce que ce pas à pas ne te donne pas
+
+Tout compile et s'exécute sur iOS, et les capacités absentes rendent une valeur
+explicite plutôt que de lever, donc un seul chemin de code sert les deux
+plateformes. Mais la promesse centrale de ce pas à pas — *un suivi qui survit à
+tout* — est celle d'Android, pas celle d'iOS.
+
+| Ce que ce pas à pas promet | Android | iOS |
+|---|---|---|
+| Suivi en arrière-plan | ✅ service de premier plan `type="location"` | ✅ `UIBackgroundModes: location`, `pausesLocationUpdatesAutomatically = false` |
+| Survit à l'app balayée des récents | ✅ `stopWithTask=false` | ⚠️ oui, sauf *force quit* |
+| Survit à la mort du processus | ✅ `START_STICKY` + watchdog ~15 min | ❌ rien ne le relance, hors changement significatif de position |
+| Survit au redémarrage du téléphone | ✅ `BOOT_COMPLETED` + `QUICKBOOT_POWERON` | ❌ non |
+| Notification « en service » permanente | ✅ obligatoire — c'est le prix du suivi en arrière-plan, et le seul signal honnête pour l'utilisateur | ❌ n'existe pas : rien ne le prévient, sauf l'indicateur système de localisation |
+| Bulle flottante | ✅ `TYPE_APPLICATION_OVERLAY` | ❌ aucune API ; `showBubble()` rend `false` |
+| Écran plein et sonnerie en silencieux | ✅ `setFullScreenIntent` + flux `USAGE_ALARM` | ⚠️ notification `.timeSensitive` ; `.critical` seulement avec l'entitlement Apple (`ios.criticalAlerts`) |
+| Rejet des positions simulées | ✅ `Location.isMock`, `isMock` sur chaque point | ❌ `CLLocation` n'expose aucun drapeau : `tracking.rejectMock` ne fait rien |
+| `getLog()` / `getOdometer()` | ✅ SQLite écrit par le service, survit au kill et au redémarrage | ⚠️ bouchons neutres : `[]`, `0`, `null` — ça se résout, ça ne rend rien |
+| `setStrings()` | ✅ renomme les canaux, reconstruit la notification | ❌ sans objet : ni notification ni canal à renommer ; les deux phrases de permission viennent d'`Info.plist`, que le système lit dans la langue du téléphone |
+
+L'échelle de permissions a la même forme en deux temps :
+`requestWhenInUseAuthorization()`, puis — seulement après accord —
+`requestAlwaysAuthorization()`, chaque attente bornée à 60 s parce qu'une boîte
+de dialogue système peut être écartée sans jamais changer le statut.
+`.authorizedWhenInUse` donne `location: 'granted'` et
+`backgroundLocation: 'denied'`, pas `'undetermined'`. `openSettings(which)`
+**ignore son argument** sur iOS : il n'y a qu'une destination, la fiche Réglages
+de l'application — ne promets pas un lien direct vers un interrupteur précis. Et
+`getPermissions()` rend **neuf clés, pas dix** : `exactAlarm` est absente, donc
+`undefined` et non `'unsupported'` ; une boucle sur une liste figée de dix noms
+affiche une case vide. Enfin `setInterval(seconds)` ne règle aucun intervalle sur
+iOS — la plateforme livre au mouvement, donc c'est le **filtre de distance** qui
+bouge.
+
+En une phrase : sur Android ce module est une garantie de survie ; sur iOS c'est
+de la localisation d'arrière-plan au mieux de ce que la plateforme concède.
+Promets la seconde chose, jamais la première.
 
 ---
 
@@ -215,11 +561,17 @@ prints a readable warning (`[expo-field-agent] …`) and the default applies.
 | `tracking.batchSize` | `50` | |
 | `tracking.queueSize` | `1000` | |
 | `tracking.heartbeatSeconds` | `max(idleIntervalSeconds × 2, 120)` | Soit `120` avec les défauts · So `120` with the defaults · أي `120` مع القيم الافتراضية |
+| `tracking.exactAlarms` | `false` | `SCHEDULE_EXACT_ALARM` reste hors du manifeste, le watchdog garde une alarme inexacte · Stays out of the manifest, the watchdog keeps an inexact alarm · يبقى خارج البيان، ويحتفظ المراقب بمنبّه غير دقيق |
+| `tracking.maxAccuracyMeters` | `100` | Au-delà, le point est du bruit et n'entre pas dans la file. Minimum `1` · Above it a fix is noise. Minimum `1` · فوقها النقطة ضجيج. الحدّ الأدنى `1` |
+| `tracking.maxSpeedMps` | `60` | Au-delà, c'est un saut GPS et non un trajet. Minimum `1` · Above it the jump is a GPS artefact. Minimum `1` · فوقها قفزة GPS لا رحلة. الحدّ الأدنى `1` |
+| `tracking.rejectMock` | `false` | Le point simulé est gardé et marqué `isMock` plutôt que rejeté · Kept and flagged rather than dropped · تُحفَظ النقطة المزيّفة وتُعلَّم بدل رفضها |
 | `notification.channelName` | `"Suivi en service"` | |
 | `notification.title` | `"En service"` | |
 | `notification.body` | `"Ta position est partagee pendant tes courses."` | |
 | `notification.icon` | `null` | L'icône de l'application · The app icon · أيقونة التطبيق |
 | `notification.color` | `"#FF6B2C"` | |
+| `notification.resumeTitle` | `"Suivi interrompu"` | |
+| `notification.resumeBody` | `"Android a refuse de relancer le suivi. Ouvre l'application pour reprendre."` | |
 | `alert.titlePattern` | `".*"` | Tout titre déclenche · Every title fires · كل عنوان يُطلق التنبيه |
 | `alert.sound` | `null` | Sonnerie d'alarme du système · The system alarm ringtone · نغمة المنبّه في النظام |
 | `alert.channelName` | `"Nouvelles courses"` | |
@@ -240,6 +592,8 @@ prints a readable warning (`[expo-field-agent] …`) and the default applies.
 | `ios.locationAlwaysPermission` | `"Ta position continue a etre partagee pendant tes courses, meme application fermee."` | |
 | `ios.criticalAlerts` | `false` | Demande l'entitlement Apple · Needs Apple's entitlement · يتطلّب تصريح Apple |
 | `rootComponent` | `"main"` | Ce qu'enregistrent `registerRootComponent` et expo-router · What `registerRootComponent` and expo-router register · ما يسجّله `registerRootComponent` و expo-router |
+| `logLevel` | `"error"` | Seules les erreurs sont écrites ; `off` n'écrit rien du tout · Errors only; `off` writes nothing · الأخطاء فقط؛ و`off` لا يكتب شيئًا |
+| `logMaxDays` | `7` | Les lignes plus vieilles sont supprimées à l'écriture suivante. Minimum `1` · Older rows are dropped on the next write. Minimum `1` |
 
 > **SDK 52 uniquement, et sans rapport avec ce module :** certaines versions
 > d'`expo-modules-core` embarquent un Compose Compiler qui refuse le Kotlin
@@ -250,7 +604,7 @@ prints a readable warning (`[expo-field-agent] …`) and the default applies.
 > ["expo-build-properties", { "android": { "kotlinVersion": "1.9.25" } }]
 > ```
 >
-> L'application `example/` l'inclut pour cette raison.
+> L'application `example/` de ce dépôt tourne sur le SDK 57 et n'en a pas besoin.
 
 > **iOS, machines Homebrew :** CocoaPods 1.16 sur Ruby 3.4 casse si la locale
 > n'est pas UTF-8 (`Unicode Normalization not appropriate for ASCII-8BIT`).
@@ -328,6 +682,13 @@ FieldAgent.setAuthHeader(value: string | null): Promise<void>;
 FieldAgent.setInterval(seconds: number): Promise<void>;                // à chaud
 FieldAgent.flush(): Promise<{ sent: number; queued: number }>;
 FieldAgent.getState(): Promise<TrackingState>;
+FieldAgent.getOdometer(): Promise<number>;                             // mètres, Android seulement
+FieldAgent.resetOdometer(): Promise<void>;                             // Android seulement
+
+// Journal (Android seulement) ---------------------------------------------
+FieldAgent.getLog(opts?: { limit?: number; sinceMs?: number }): Promise<LogEntry[]>;  // plus récent d'abord
+FieldAgent.clearLog(): Promise<void>;
+FieldAgent.exportLog(): Promise<string | null>;                        // chemin du fichier écrit
 
 // Bulle -------------------------------------------------------------------
 FieldAgent.showBubble(): Promise<boolean>;                             // false si iOS ou permission absente
@@ -346,10 +707,10 @@ FieldAgent.getPendingAlert(): Promise<AlertPayload | null>;
 FieldAgent.getPendingAlertSync(): AlertPayload | null;
 
 // Événements --------------------------------------------------------------
-FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', cb): Subscription;
+FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress' | 'providerChange', cb): Subscription;
 ```
 
-`Permissions` porte neuf clés :
+`Permissions` porte dix clés :
 
 | clé | ce que c'est |
 |---|---|
@@ -362,6 +723,7 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 | `fullScreenIntent` | **ajout** — Android 14 place `setFullScreenIntent` derrière un accès spécial. Sans lui l'alerte au verrouillage retombe silencieusement en notification classique, donc l'état est visible plutôt que supposé. |
 | `notificationAccess` | **ajout** — l'écran système d'accès aux notifications, utile uniquement au `alert.notificationBridge` optionnel. `unsupported` tant que le pont n'est pas activé. |
 | `autostart` | **ajout** — l'écran de démarrage automatique du constructeur. Aucune API ne le lit : `granted` une fois que l'utilisateur y est passé, `undetermined` avant, `unsupported` sur une marque sans écran connu. |
+| `exactAlarm` | **ajout** — `SCHEDULE_EXACT_ALARM`, pour le `tracking.exactAlarms` optionnel. `unsupported` tant que tu n'as pas activé l'option, parce que sans elle la permission n'est même pas dans le manifeste et envoyer l'utilisateur l'accorder n'accorderait rien. Une fois activée : `granted` sous Android 12, où l'alarme est exacte sans rien demander, puis `granted` / `denied` selon `canScheduleExactAlarms()`. |
 
 ### Quand la localisation d'arrière-plan disparaît en pleine journée
 
@@ -383,6 +745,193 @@ peut y remédier depuis les réglages système.
 
 Deux clés en plus du contrat d'origine, parce que sans elles l'alerte et le
 suivi cassent sur Android 14+ et sur MIUI/EMUI/ColorOS **sans rien dire**.
+
+### Alarmes exactes — `SCHEDULE_EXACT_ALARM` seulement, et seulement si tu le demandes
+
+Android a deux permissions d'alarme exacte. Ce plugin n'en déclarera jamais
+qu'une seule, et c'est une politique, pas un oubli.
+
+`USE_EXACT_ALARM` est accordée à l'installation et ne demande rien à
+l'utilisateur — raison pour laquelle Google Play la réserve aux réveils, aux
+minuteurs et aux agendas. Une application de livraison qui la livre voit sa mise
+à jour rejetée. Elle n'est **jamais** déclarée ici, option activée ou non : même
+refus, pour la même raison, que `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, que ce
+module n'a jamais demandée et ne demandera pas.
+
+`SCHEDULE_EXACT_ALARM` est celle que l'utilisateur accorde depuis un écran de
+réglages. Elle entre dans le manifeste **uniquement** quand tu mets
+`tracking.exactAlarms: true`, exactement comme `alert.notificationBridge` : une
+permission que l'hôte n'a pas demandée, c'est une revue de store à laquelle il
+n'a pas souscrit.
+
+```json
+["expo-field-agent", { "tracking": { "exactAlarms": true } }]
+```
+
+**Ce que l'option achète vraiment.** L'alarme du watchdog est ce qui réveille le
+processus toutes les ~15 minutes pour vérifier que le suivi est encore vivant et
+relancer le service sinon. Depuis Android 12, démarrer un service de premier
+plan depuis l'arrière-plan est interdit hors d'une courte liste d'exemptions —
+et une alarme inexacte `setAndAllowWhileIdle` n'est **pas** sur cette liste,
+alors qu'une alarme exacte `setExactAndAllowWhileIdle` y est. Sans l'option le
+watchdog se réveille quand même et essaie quand même ; il est simplement refusé
+plus souvent, et la reprise attend alors le prochain passage au premier plan.
+Avec, la reprise est autorisée sur-le-champ. Toute la différence est là : pas la
+précision, le droit d'agir.
+
+Fais-la accorder comme n'importe quel autre accès spécial :
+
+```ts
+const { exactAlarm } = await FieldAgent.getPermissions();
+if (exactAlarm === 'denied') await FieldAgent.openSettings('exactAlarm');
+```
+
+C'est une décision de compilation. Contrairement aux clés de cadence, elle ne
+s'active pas depuis `start()` : la permission doit être dans le manifeste avant
+la livraison, et rien à chaud ne peut l'y mettre.
+
+Le chemin inexact est un repli et non un `else` : la permission peut être retirée
+entre deux ticks, donc `canScheduleExactAlarms()` est relu à chaque armement et
+une `SecurityException` retombe directement sur l'alarme inexacte plutôt que de
+perdre le watchdog.
+
+### Ce que rend `getState()`
+
+```ts
+type TrackingState = {
+  running: boolean;
+  queued: number;                            // points en attente sur disque
+  lastFixAt: number | null;                  // ms Unix, lu sur le point
+  lastSentAt: number | null;                 // ms Unix du dernier POST accepté
+  lastError: string | null;                  // « CODE: message » — la dernière, pas un historique
+  lastErrorAt: number | null;                // quand elle s'est produite
+  provider: 'fused' | 'manager' | 'none';    // ce qui acquiert réellement
+  locationEnabled: boolean;                  // l'interrupteur de localisation du système
+};
+```
+
+Les trois dernières sont des ajouts, et chacune répond à une question qui n'avait
+aucune réponse depuis l'extérieur :
+
+- **`lastErrorAt`** — une erreur sans date ne se trie pas. « File pleine » d'il y
+  a trois jours et « file pleine » d'il y a trois secondes, c'est la même chaîne,
+  et une seule des deux est un incident. Un avertissement n'écrase jamais la
+  paire ; seule une vraie erreur le fait.
+- **`provider`** — `'fused'` c'est Google Play Services, `'manager'` le repli sur
+  `LocationManager` sur un appareil qui n'en a pas (Huawei récents, ROMs
+  allégées), `'none'` quand rien ne tourne. Les deux n'ont jamais été la même
+  chose et rien ne disait lequel tu avais ; une cadence plus grossière a
+  désormais une cause.
+- **`locationEnabled`** — l'interrupteur système. `false` explique à lui seul une
+  absence de points, et c'est la première chose à regarder avant d'accuser le
+  service.
+
+**Sur iOS ces trois clés sont absentes de la charge et valent `undefined`.** Le
+tracker iOS rend les cinq clés d'origine. Traite-les comme Android seulement tant
+que ça n'a pas changé.
+
+### `providerChange` — la localisation elle-même coupée
+
+Android seulement. Un chauffeur qui déroule le volet et coupe la tuile de
+localisation, ou qui passe en mode avion, disparaît de la carte avec le service
+toujours vivant et toujours vert : le fournisseur fusionné cesse simplement de
+livrer, sans rappel et sans exception. Le broadcast `PROVIDERS_CHANGED` est le
+seul signal qui existe.
+
+```ts
+FieldAgent.addListener('providerChange', ({ enabled, gps, network }) => {
+  if (!enabled) afficherBandeau('Localisation coupée — plus rien n est enregistré.');
+});
+```
+
+`enabled` vaut `gps || network` ; les deux drapeaux servent au cas où un seul
+fournisseur a disparu. Quand la localisation se coupe alors que le suivi est
+voulu, une `error` de code **`LOCATION_OFF`** part en plus. Quand elle revient,
+le service redemande les mises à jour tout seul — le fournisseur fusionné ne
+reprend pas une requête tombée pendant la coupure — donc l'hôte n'a rien à faire.
+
+iOS n'a pas de broadcast équivalent et **n'émet jamais cet événement.** Un
+écouteur y est inerte, pas faux.
+
+### Le journal natif — `getLog()`, `clearLog()`, `exportLog()`
+
+Android seulement. Les pannes qui méritent d'être lues arrivent sur un téléphone
+dans une camionnette, des heures avant que quelqu'un le branche en adb, et
+logcat est un tampon circulaire que le système recycle en quelques minutes. Ce
+journal est une table SQLite dans le stockage de l'application, écrite par le
+**service** : il continue donc d'enregistrer à travers une mort de processus, un
+redémarrage et une journée entière sans le moindre JavaScript.
+
+```ts
+const entrees = await FieldAgent.getLog({ limit: 100 });
+// [{ at: 1758546185123, level: 'error', code: 'FOREGROUND', message: '…' }, …]
+
+const chemin = await FieldAgent.exportLog();   // fichier de cache, plus ancien d'abord, ou null
+await FieldAgent.clearLog();
+```
+
+- Plus récent d'abord, `limit` vaut `500` par défaut et `sinceMs` `0`. Les deux
+  sont validés avant tout le reste : un `limit` non entier, un `limit` sous 1, un
+  `sinceMs` négatif ou non fini **lèvent**, dans Expo Go comme ailleurs, parce que
+  ce sont des bugs dans ton code et pas des limites de plateforme.
+- `exportLog()` écrit tout le journal dans `cacheDir/field-agent/log-export.txt`,
+  une ligne par entrée, plus ancien d'abord — l'ordre dans lequel on lit un
+  incident — et rend le chemin absolu, ou `null` si l'écriture a échoué.
+  Horodatage en UTC et locale fixe, pour qu'un téléphone en arabe ne livre pas
+  des chiffres arabes orientaux et qu'un téléphone à Tunis n'estampille pas +01 à
+  côté d'une chronologie serveur en UTC.
+- `logLevel` est le plancher : `error` par défaut, `off` n'écrit rien du tout. Un
+  journal qui enregistre chaque point est un journal que personne ne lit et une
+  base qui grossit toute seule.
+- La rétention est double : les lignes plus vieilles que `logMaxDays` sont
+  supprimées à l'écriture suivante, et la table est ramenée à un plafond dur de
+  **10 000 lignes**, non configurable. Un disque plein ou une base corrompue ne
+  fait jamais tomber le service ; l'écriture est simplement perdue.
+- **Aucune position n'y entre**, ni aucun en-tête d'authentification. L'export
+  quitte l'appareil dès que quelqu'un appuie sur le bouton, et une position est
+  une donnée personnelle. Ce qui y entre, ce sont des codes et des raisons :
+  `FOREGROUND`, `LOCATION_OFF`, `NO_FIX`, `STALE`, `OFFLINE`, `PROVIDER`.
+
+### Le compteur kilométrique
+
+Android seulement. Des mètres accumulés côté natif depuis la dernière remise à
+zéro, à travers les morts de processus et les redémarrages :
+
+```ts
+const metres = await FieldAgent.getOdometer();
+await FieldAgent.resetOdometer();            // par exemple en début de service
+```
+
+Il ne compte que les pas entre des points que le filtre de qualité a **gardés**,
+et il ignore tout pas plus court que la pire des deux précisions : le bruit GPS
+d'un scooter garé la nuit facturerait sinon des dizaines de kilomètres au matin.
+C'est donc un plancher et pas un compteur de facturation — un tunnel ou une perte
+de signal, c'est de la distance qu'il ne prétend pas avoir vue.
+
+### Qualité des points — précision, vitesse, positions simulées
+
+Trois clés décident de ce que le filtre accepte, et ce sont des réglages plutôt
+que des constantes parce qu'un scooter en ville dense et une camionnette sur
+autoroute n'ont pas la même idée du saut impossible :
+
+| clé | défaut | ce qu'elle rejette |
+|---|---|---|
+| `tracking.maxAccuracyMeters` | `100` | Un point que la plateforme annonce elle-même pire que ça : une estimation par antenne, pas une position |
+| `tracking.maxSpeedMps` | `60` | Deux points qui impliquent plus — 60 m/s font 216 km/h, au-delà c'est un saut GPS et pas un véhicule |
+| `tracking.rejectMock` | `false` | Avec `true`, tout point qu'Android signale comme venant d'un fournisseur simulé |
+
+Deux choses arrivent quelle que soit ta configuration. Chaque point porte
+désormais `isMock` dans l'événement `position` et `is_mock` dans la charge POST,
+pour qu'un serveur qui facture au kilomètre tranche lui-même au lieu que la
+décision soit prise sur le téléphone. Et les garde-fous de plausibilité ne
+mesurent plus le temps écoulé avec l'horloge murale quand les deux points portent
+l'horloge de fonctionnement de l'appareil : l'horloge murale est exactement ce
+qu'un chauffeur peut avancer depuis les réglages pour s'offrir l'exemption
+« tunnel » et faire passer un téléport ; l'uptime, non.
+
+Avec `rejectMock: true`, le premier point simulé rejeté lève une `error` de code
+**`MOCK_LOCATION`** — une seule fois par exécution, parce que la fraude doit se
+voir mais qu'un déluge de lignes n'aide personne.
 
 ### La charge d'une alerte
 
@@ -429,6 +978,8 @@ await FieldAgent.setStrings({
   dismiss: 'تجاهل',
   bubbleLabel: 'تتبّع',
   bubbleAccessibility: '%s — اضغط لفتح التطبيق',
+  resumeTitle: 'توقّف التتبّع',
+  resumeBody: 'رفض أندرويد إعادة تشغيل التتبّع. افتح التطبيق للمتابعة.',
 });
 ```
 
@@ -502,10 +1053,23 @@ refusé, avec un message qui le dit. Les images embarquées vont dans
 | Écran plein à la réception | ✅ `setFullScreenIntent` + `CATEGORY_CALL` + canal `IMPORTANCE_HIGH`, **et** exemption via `SYSTEM_ALERT_WINDOW` | ⚠️ pas d'équivalent. Notification `.timeSensitive` (`.critical` avec l'entitlement). CallKit donnerait un vrai plein écran mais Apple rejette l'abus : ce n'est pas un appel, donc ce n'est pas utilisé. |
 | Contourner « Ne pas déranger » | ⚠️ `setBypassDnd(true)` seulement si `ACCESS_NOTIFICATION_POLICY` est déjà accordée **au moment de la création du canal** | ⚠️ `.timeSensitive` perce les modes de concentration ; le reste demande Critical Alerts |
 | Écrans constructeurs (autostart) | ✅ table par marque + repli sur la fiche de l'application | ❌ sans objet |
+| Watchdog sur alarme exacte | ⚠️ `SCHEDULE_EXACT_ALARM` en option seulement, jamais `USE_EXACT_ALARM` ; sans elle la reprise est refusée plus souvent | ❌ sans objet, il n'y a pas d'`AlarmManager` et rien à relancer |
+| Journal embarqué (`getLog`, `clearLog`, `exportLog`) | ✅ SQLite écrit par le service, survit à la mort du processus et au redémarrage | ⚠️ **déclaré mais vide.** Les trois fonctions existent sur le module iOS et rendent `[]`, rien et `null` : ça se résout, ça n'enregistre rien. |
+| Compteur kilométrique (`getOdometer`, `resetOdometer`) | ✅ accumulé sur les points acceptés, persisté | ⚠️ **déclaré mais vide** : `getOdometer()` rend toujours `0` |
+| Événement `providerChange` | ✅ receiver `PROVIDERS_CHANGED`, plus une erreur `LOCATION_OFF` et une redemande automatique au retour | ❌ pas de broadcast équivalent ; iOS ne l'émet jamais |
+| `getState().provider` / `.locationEnabled` / `.lastErrorAt` | ✅ | ⚠️ présentes dans la charge iOS : `provider` vaut `'manager'` ou `'none'`, `locationEnabled` est réel, `lastErrorAt` est toujours `null` |
+| Rejet des positions simulées (`tracking.rejectMock`) | ✅ `Location.isMock`, et `isMock` sur chaque point | ❌ `CLLocation` n'expose aucun drapeau de ce genre ; la clé ne fait rien et aucun `is_mock` n'est envoyé |
 
 Le plugin **compile et s'exécute sur iOS dans tous les cas**. Les capacités
 absentes rendent une valeur explicite (`false`, `"unsupported"`), jamais une
 exception.
+
+**Y compris les cinq fonctions du journal natif et du compteur kilométrique.**
+`getLog`, `clearLog`, `exportLog`, `getOdometer` et `resetOdometer` sont bien
+déclarées sur le module iOS — sans quoi l'appel rejetterait —, mais ce sont des
+bouchons : `[]`, `null`, `0`, et rien d'écrit. Ne construis pas d'écran de
+diagnostic iOS dessus. Dans Expo Go, où il n'y a aucun module natif, les valeurs
+neutres du tableau de dégradation s'appliquent de la même façon.
 
 ---
 
@@ -522,8 +1086,12 @@ théorique.
    n'envoient que le second) ; watchdog `setAndAllowWhileIdle` toutes les
    ~15 min ; l'état « en service » vit dans les préférences, pas en mémoire.
    Quand Android 12+ refuse un démarrage depuis l'arrière-plan, l'échec est
-   visible (`error` de code `SERVICE_START`) et une notification « reprendre »
-   est posée — il n'est pas avalé.
+   visible — une `error` de code `SERVICE_START`, une **promesse `start()`
+   rejetée**, et une notification « suivi interrompu » sur son propre canal, qui
+   dit que le suivi est arrêté et non le contraire, et qui s'efface dès que le
+   service revient. `tracking.exactAlarms` rend la reprise du watchdog bien
+   moins souvent refusée ; la section sur les alarmes exactes dit ce que cette
+   permission coûte.
 3. **Canaux de notification versionnés** — un canal existant ne relit jamais son
    importance, son son, sa vibration ni son contournement du DND. Les
    identifiants portent la version (`fa_alert_v1`), la variante DND et la
@@ -789,6 +1357,18 @@ d'accueil. Ses trois ressources (`assets/notif.png`, `assets/bulle.png`,
 `assets/alerte.wav`) sont des marqueurs générés : remplace-les par les tiennes,
 le plugin ne fait que les copier.
 
+Ces douze-là sont la passe fonctionnelle. Ce qu'ils ne mesurent pas, c'est la
+**durée** — les cinq états dans lesquels Android coupe réellement les vivres, et
+qui vont très bien pendant les cinq minutes où tu les regardes écran allumé. Ce
+harnais-là est séparé : un serveur de réception Node sans aucune dépendance, qui
+enregistre le `recorded_at` de chaque point reçu et imprime le plus grand trou,
+plus un script adb par scénario (Doze, `am kill`, arrière-plan restreint par
+`appops`, redémarrage, bucket rare). Le verdict tient dans un seul nombre —
+**aucun trou supérieur à 2 × l'intervalle configuré** — et le serveur sort en
+code non nul quand il est dépassé, donc une CI peut bloquer dessus. Tout est dans
+[docs/ENDURANCE.md](docs/ENDURANCE.md) et `scripts/endurance/`, y compris
+pourquoi `am force-stop` est le cas dont on ne revient pas.
+
 ---
 
 ## Tests automatiques
@@ -803,15 +1383,44 @@ cd example && npx expo prebuild --platform android && cd android && ./gradlew :e
 
 - **`Geo`** — filtre de plausibilité en JVM pur, sans Android : accuracy
   aberrante, points hors ordre, sauts impossibles, exemption tunnel, filtre de
-  distance contre battement de cœur. 16 cas.
+  distance contre battement de cœur, l'horloge de fonctionnement qu'une horloge
+  murale avancée ne trompe pas, le verdict « position simulée », le pas du
+  compteur kilométrique et la borne de fraîcheur du battement. 35 cas.
+- **`Log`** — l'échelle de sévérité, l'arithmétique de rétention et le format
+  d'une ligne en UTC, sans le moindre Android (11 cas) ; puis la moitié SQLite
+  sous Robolectric : rotation, plafond de 10 000 lignes, ordre de l'export, et
+  une base qui refuse de s'ouvrir sans emporter le service. 9 cas.
 - **`Queue`** — ajout, plafond, retrait par identifiants (y compris avec des
   points ajoutés « en vol »), survie au redémarrage, fichier tronqué par un
   kill. 9 cas.
-- **config plugin** — le manifeste produit contient bien les permissions, le
-  service `type="location"` et `stopWithTask=false`, le receiver de boot avec
-  ses variantes quickboot, l'activité d'alerte `showWhenLocked` ; l'insertion
-  dans `build.gradle` est idempotente ; une config malformée avertit au lieu de
-  planter. 13 cas.
+- **`Volume` et `Images`** — le volume d'alarme comme plancher et jamais comme
+  plafond, et le décodage « bornes avant pixels » de la bulle. 14 cas.
+- **`LocationSource`** — le choix fused/manager à partir de la seule
+  disponibilité (2 cas), puis `ManagerSource` contre un faux `LocationManager` :
+  les deux fournisseurs demandés, celui qui est désactivé ignoré au lieu de
+  lever, le plus frais des deux derniers points connus gardé. 4 cas.
+- **`Bus`** — une erreur atteint l'écouteur *et* le disque, un avertissement
+  n'efface jamais la dernière erreur, et une erreur levée avant `attach()` sort
+  quand même. 6 cas.
+- **`Config`** — les nouvelles clés sont bien lues dans le manifeste, un hôte
+  silencieux reçoit les défauts livrés, un plafond à zéro est remonté à un, une
+  valeur aberrante retombe sur « erreurs seulement », une option de `start()`
+  l'emporte sur le manifeste — et `exactAlarms` n'est délibérément pas quelque
+  chose qu'une option de `start()` peut activer, parce que la permission se
+  décide à la compilation. 8 cas.
+- **`Watchdog`** — `exactAlarm` vaut `unsupported` tant que l'hôte n'a pas
+  activé l'option, une alarme refusée est écrite au lieu d'être levée, un
+  changement de fournisseur porte ce qui reste actif, le retour de la
+  localisation ne relance le service que si quelqu'un est en service, et le
+  silence n'est daté qu'au-delà de la borne. 8 cas.
+- **config plugin et surface JS** — le manifeste produit contient bien les
+  permissions, le service `type="location"` et `stopWithTask=false`, le receiver
+  de boot avec ses variantes quickboot, l'activité d'alerte `showWhenLocked`, le
+  receiver `PROVIDERS_CHANGED`, et `SCHEDULE_EXACT_ALARM` **seulement** si l'hôte
+  l'a demandée ; l'insertion dans `build.gradle` est idempotente ; chaque prop
+  malformée avertit et retombe sur son défaut au lieu de planter ; et Expo Go
+  rend sa valeur neutre à chaque appel pendant que les erreurs d'argument lèvent
+  toujours. 55 cas.
 
 Le reste est manuel, assumé, et décrit dans le tableau ci-dessus.
 
@@ -822,7 +1431,8 @@ Le reste est manuel, assumé, et décrit dans le tableau ci-dessus.
 | `expo prebuild` (Android) → manifeste, `res/raw`, `res/drawable`, `build.gradle` | ✅ |
 | `expo prebuild` (iOS) → `Info.plist`, son ajouté au projet Xcode | ✅ |
 | `:expo-field-agent:compileDebugKotlin` — Expo SDK 52 | ✅ zéro avertissement dans les sources du module |
-| `:expo-field-agent:test` — Geo + Queue | ✅ 25/25 |
+| `:expo-field-agent:testDebugUnitTest` — Geo, Log, Queue, Volume, Images, LocationSource, Bus, Config, Watchdog | ✅ 106/106 |
+| `npm test` — config plugin, props, dégradation Expo Go | ✅ 55/55 |
 | `:app:assembleDebug` — APK complet, manifeste fusionné | ✅ |
 | `xcodebuild -target ExpoFieldAgent` (simulateur iOS) | ✅ |
 | `npm pack` → installation dans une application Expo **SDK 57** neuve, `expo prebuild`, compilation | ✅ sans une seule modification manuelle |
@@ -883,10 +1493,21 @@ signal et du modèle ; un chiffre mesuré sur un Pixel ne dit rien d'un Redmi.
 le CPU dort**. Téléphone immobile, écran éteint, Doze : le battement ne part pas
 à `heartbeatSeconds`, il part au réveil suivant du service — c'est-à-dire au
 plus tard à l'alarme du watchdog, soit le plancher que le système impose aux
-alarmes *while-idle*, **~15 minutes**. Descendre en dessous demanderait une
-alarme exacte, que Google Play refuse aux applications qui ne sont ni réveil ni
-agenda. En course, le problème ne se pose pas : chaque point GPS réveille le
+alarmes *while-idle*, **~15 minutes**. Descendre en dessous demande une alarme
+exacte. `tracking.exactAlarms` ouvre exactement cette porte et pas une de plus :
+uniquement `SCHEDULE_EXACT_ALARM`, que l'utilisateur accorde et peut reprendre,
+jamais l'`USE_EXACT_ALARM` d'installation que Google Play réserve aux réveils et
+aux agendas. En course, le problème ne se pose pas : chaque point GPS réveille le
 CPU. Mesuré sur émulateur, pas déduit.
+
+**Le battement se tait plutôt que de mentir.** Renvoyer la dernière position
+connue sous un horodatage frais est tout son intérêt — mais passé
+`max(heartbeatSeconds × 4, 5 min)` comptés depuis le moment où ce processus a
+accepté ce point, il n'envoie plus rien et écrit une ligne `STALE` dans le
+journal. Un téléphone qui a perdu le GPS dans un parking souterrain il y a
+quarante minutes publiait là où il était comme là où il est, et un régulateur qui
+route là-dessus envoie quelqu'un dans une rue vide. Le silence est la réponse
+honnête, et le contrôle de fraîcheur du serveur fait le reste.
 
 **`flush()` sans service.** Fonctionne : la file et le transport vivent dans
 `Outbox`, pas dans le service, donc un `flush()` manuel envoie même quand le

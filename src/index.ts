@@ -11,6 +11,7 @@ import type {
   FieldAgentStrings,
   FieldAgentEventName,
   FlushResult,
+  LogEntry,
   PermissionName,
   Permissions,
   TrackingOptions,
@@ -31,6 +32,7 @@ const UNSUPPORTED: Permissions = {
   fullScreenIntent: 'unsupported',
   autostart: 'unsupported',
   notificationAccess: 'unsupported',
+  exactAlarm: 'unsupported',
 };
 
 let warnedAboutExpoGo = false;
@@ -134,9 +136,68 @@ export async function flush(): Promise<FlushResult> {
 
 export async function getState(): Promise<TrackingState> {
   if (!nativeModule) {
-    return { running: false, queued: 0, lastFixAt: null, lastSentAt: null, lastError: MISSING_NATIVE_MODULE };
+    return {
+      running: false,
+      queued: 0,
+      lastFixAt: null,
+      lastSentAt: null,
+      lastError: MISSING_NATIVE_MODULE,
+      lastErrorAt: null,
+      provider: 'none',
+      locationEnabled: false,
+    };
   }
   return nativeModule.getState();
+}
+
+/** Metres travelled since the last reset, kept across reboots by the service. */
+export async function getOdometer(): Promise<number> {
+  if (!nativeModule) return unavailable(0);
+  return nativeModule.getOdometer();
+}
+
+export async function resetOdometer(): Promise<void> {
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.resetOdometer();
+}
+
+// --- Log -------------------------------------------------------------------
+
+/**
+ * Reads the native log, newest first. It is written by the service itself, so
+ * it survives the process being killed — which is precisely when there is no
+ * JavaScript around to have recorded anything.
+ *
+ * `limit` caps the rows returned, `sinceMs` keeps only entries newer than that
+ * Unix timestamp. Both are checked before the availability test on purpose: a
+ * bad argument is a bug in the host's code and must not hide in Expo Go.
+ */
+export async function getLog(options?: { limit?: number; sinceMs?: number }): Promise<LogEntry[]> {
+  const limit = options?.limit ?? 500;
+  const sinceMs = options?.sinceMs ?? 0;
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('getLog attend un limit entier >= 1.');
+  }
+  if (!Number.isFinite(sinceMs) || sinceMs < 0) {
+    throw new Error('getLog attend un sinceMs fini >= 0.');
+  }
+  if (!nativeModule) return unavailable<LogEntry[]>([]);
+  return nativeModule.getLog(limit, sinceMs);
+}
+
+export async function clearLog(): Promise<void> {
+  if (!nativeModule) return unavailable(undefined);
+  return nativeModule.clearLog();
+}
+
+/**
+ * Writes the whole log to a file in the cache directory and returns its path,
+ * oldest first — the order a human reads an incident in. Null when there is
+ * nothing to export or the write failed.
+ */
+export async function exportLog(): Promise<string | null> {
+  if (!nativeModule) return unavailable<string | null>(null);
+  return nativeModule.exportLog();
 }
 
 // --- Bubble ----------------------------------------------------------------

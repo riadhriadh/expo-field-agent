@@ -151,7 +151,13 @@ final class FieldAgentTracker: NSObject, CLLocationManagerDelegate {
       "queued": queue.count(),
       "lastFixAt": lastFix > 0 ? lastFix : NSNull(),
       "lastSentAt": lastSentAt > 0 ? lastSentAt : NSNull(),
-      "lastError": defaults.string(forKey: lastErrorKey) ?? NSNull()
+      "lastError": defaults.string(forKey: lastErrorKey) ?? NSNull(),
+      // Declared by TrackingState, so they are answered here rather than read as
+      // undefined: a type that is only true on one platform is worse than a
+      // platform that admits what it does not have.
+      "lastErrorAt": NSNull(),
+      "provider": running ? "manager" : "none",
+      "locationEnabled": CLLocationManager.locationServicesEnabled()
     ]
   }
 

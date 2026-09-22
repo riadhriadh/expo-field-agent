@@ -13,7 +13,21 @@ data class TrackingConfig(
     val distanceFilterMeters: Double,
     val batchSize: Int,
     val queueSize: Int,
-    val heartbeatSeconds: Int
+    val heartbeatSeconds: Int,
+    /** Beyond this the fix is a cell-tower guess, not a position. */
+    val maxAccuracyMeters: Double,
+    /** Implicit speed above which two fixes are a GPS jump, not a journey. */
+    val maxSpeedMps: Double,
+    /** Blocks faked positions: mock-location fraud, rider side. */
+    val rejectMock: Boolean,
+    /**
+     * Exact alarms for the watchdog. Off by default, and never USE_EXACT_ALARM:
+     * Google Play reserves that one for clocks and calendars, the same way it
+     * refuses REQUEST_IGNORE_BATTERY_OPTIMIZATIONS (see Power.kt). Only
+     * SCHEDULE_EXACT_ALARM, which the user grants, is ever declared — and only
+     * when the host asks for it.
+     */
+    val exactAlarms: Boolean
 )
 
 data class NotificationConfig(
@@ -21,7 +35,10 @@ data class NotificationConfig(
     val title: String,
     val body: String,
     val icon: String?,
-    val color: Int
+    val color: Int,
+    /** Shown when Android refused the start: the opposite of "on duty". */
+    val resumeTitle: String,
+    val resumeBody: String
 )
 
 data class AlertConfig(
@@ -55,7 +72,10 @@ data class FieldAgentConfig(
     val notification: NotificationConfig,
     val alert: AlertConfig,
     val bubble: BubbleConfig,
-    val rootComponent: String
+    val rootComponent: String,
+    /** Floor for the native log. OFF writes nothing at all. */
+    val logLevel: Log.Level,
+    val logMaxDays: Int
 )
 
 /**
@@ -137,14 +157,29 @@ object Config {
                 ).coerceAtLeast(0.0),
                 batchSize = trackInt("batchSize", 50),
                 queueSize = trackInt("queueSize", 1000),
-                heartbeatSeconds = trackInt("heartbeatSeconds", 120)
+                heartbeatSeconds = trackInt("heartbeatSeconds", 120),
+                maxAccuracyMeters = overrides.optDouble(
+                    "maxAccuracyMeters",
+                    tracking.optDouble("maxAccuracyMeters", Geo.MAX_ACCURACY_METERS)
+                ).coerceAtLeast(1.0),
+                maxSpeedMps = overrides.optDouble(
+                    "maxSpeedMps",
+                    tracking.optDouble("maxSpeedMps", Geo.MAX_SPEED_MPS)
+                ).coerceAtLeast(1.0),
+                rejectMock = overrides.optBoolean("rejectMock", tracking.optBoolean("rejectMock", false)),
+                exactAlarms = tracking.optBoolean("exactAlarms", false)
             ),
             notification = NotificationConfig(
                 channelName = notification.str("channelName", "Suivi en service")!!,
                 title = notification.str("title", "En service")!!,
                 body = notification.str("body", "Ta position est partagee.")!!,
                 icon = notification.str("icon", null),
-                color = color(notification, "color", "#FF6B2C")
+                color = color(notification, "color", "#FF6B2C"),
+                resumeTitle = notification.str("resumeTitle", "Suivi interrompu")!!,
+                resumeBody = notification.str(
+                    "resumeBody",
+                    "Android a refuse de relancer le suivi. Ouvre l'application pour reprendre."
+                )!!
             ),
             alert = AlertConfig(
                 titlePattern = alert.str("titlePattern", ".*")!!,
@@ -167,7 +202,9 @@ object Config {
                 bad = color(bubbleColors, "bad", "#E5484D"),
                 urgent = color(bubbleColors, "urgent", "#E5484D")
             ),
-            rootComponent = manifest.str("rootComponent", "main")!!
+            rootComponent = manifest.str("rootComponent", "main")!!,
+            logLevel = Log.Policy.parseLevel(overrides.str("logLevel", manifest.str("logLevel", null))),
+            logMaxDays = overrides.optInt("logMaxDays", manifest.optInt("logMaxDays", 7)).coerceAtLeast(1)
         )
     }
 }

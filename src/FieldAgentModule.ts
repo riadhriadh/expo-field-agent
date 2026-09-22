@@ -7,6 +7,7 @@ import type {
   FieldAgentStrings,
   FieldAgentEventMap,
   FlushResult,
+  LogEntry,
   PermissionName,
   Permissions,
   TrackingOptions,
@@ -25,6 +26,12 @@ export declare class FieldAgentNativeModule extends NativeModule<FieldAgentEvent
   setIntervalSeconds(seconds: number): Promise<void>;
   flush(): Promise<FlushResult>;
   getState(): Promise<TrackingState>;
+  getOdometer(): Promise<number>;
+  resetOdometer(): Promise<void>;
+
+  getLog(limit: number, sinceMs: number): Promise<LogEntry[]>;
+  clearLog(): Promise<void>;
+  exportLog(): Promise<string | null>;
 
   showBubble(): Promise<boolean>;
   hideBubble(): Promise<void>;

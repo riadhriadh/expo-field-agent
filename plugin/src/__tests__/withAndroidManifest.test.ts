@@ -19,6 +19,8 @@ function names(nodes: unknown): string[] {
   return ((nodes ?? []) as { $: Record<string, string> }[]).map((node) => node.$['android:name']);
 }
 
+const URL = 'https://api.exemple.tn/api/positions';
+
 describe('applyManifest', () => {
   const props = resolveProps({ tracking: { url: 'https://api.exemple.tn/api/positions' } }, __dirname);
   const manifest = applyManifest(emptyManifest(), props, null);
@@ -131,6 +133,49 @@ describe('applyManifest', () => {
     );
   });
 
+  it('leaves the exact-alarm permission out unless the host asked for it', () => {
+    expect(names(manifest.manifest['uses-permission'])).not.toContain(
+      'android.permission.SCHEDULE_EXACT_ALARM'
+    );
+  });
+
+  it('adds the exact-alarm permission when the host opts in', () => {
+    const opted = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions', exactAlarms: true } },
+      __dirname
+    );
+    const declared = names(applyManifest(emptyManifest(), opted, null).manifest['uses-permission']);
+    expect(declared).toContain('android.permission.SCHEDULE_EXACT_ALARM');
+  });
+
+  it('never declares USE_EXACT_ALARM, opted in or not', () => {
+    // Google Play reserves it for alarm and calendar apps; carrying it is a removal.
+    const opted = resolveProps(
+      { tracking: { url: 'https://api.exemple.tn/api/positions', exactAlarms: true } },
+      __dirname
+    );
+    for (const candidate of [manifest, applyManifest(emptyManifest(), opted, null)]) {
+      expect(names(candidate.manifest['uses-permission'])).not.toContain(
+        'android.permission.USE_EXACT_ALARM'
+      );
+    }
+  });
+
+  it('declares the providers receiver so a switched-off GPS is noticed', () => {
+    const receivers = application.receiver as { $: Record<string, string>; 'intent-filter'?: unknown }[];
+    const providers = receivers.find((node) =>
+      node.$['android:name'].endsWith('ProvidersChangedReceiver')
+    )!;
+    expect(providers).toBeDefined();
+    expect(providers.$['android:name']).toBe('expo.modules.fieldagent.ProvidersChangedReceiver');
+    // PROVIDERS_CHANGED is a protected system broadcast: nothing else may send it.
+    expect(providers.$['android:exported']).toBe('false');
+    const actions = (
+      providers['intent-filter'] as { action: { $: Record<string, string> }[] }[]
+    )[0].action.map((a) => a.$['android:name']);
+    expect(actions).toContain('android.location.PROVIDERS_CHANGED');
+  });
+
   it('declares the tracking service as a location foreground service that survives task removal', () => {
     const service = (application.service as { $: Record<string, string> }[])[0];
     expect(service.$['android:name']).toBe('expo.modules.fieldagent.TrackingService');
@@ -179,7 +224,7 @@ describe('applyManifest', () => {
     const app = twice.manifest.application![0] as unknown as Record<string, unknown>;
     expect((app.service as unknown[]).length).toBe(1);
     expect((app.activity as unknown[]).length).toBe(1);
-    expect((app.receiver as unknown[]).length).toBe(3);
+    expect((app.receiver as unknown[]).length).toBe(4);
   });
 });
 
@@ -202,5 +247,34 @@ describe('resolveProps', () => {
     const spy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(resolveProps({ alert: { titlePattern: '[' } }, __dirname).alert.titlePattern).toBe('.*');
     spy.mockRestore();
+  });
+
+  // `expo prebuild` reuses an existing android/ directory, so opting OUT has to
+  // actively withdraw what a previous run wrote. Caught by running a real
+  // prebuild: the example never enabled the bridge, yet shipped its declaration.
+  it('withdraws the notification listener when the host turns the bridge back off', () => {
+    const enabled = resolveProps({ tracking: { url: URL }, alert: { notificationBridge: true } }, __dirname);
+    const on = applyManifest(emptyManifest(), enabled, null);
+    expect(names((on.manifest.application![0] as never as Record<string, unknown>).service)).toContain(
+      'expo.modules.fieldagent.NotificationBridge'
+    );
+
+    // The SAME manifest run again with the bridge off: the node must be gone.
+    const off = applyManifest(on, resolveProps({ tracking: { url: URL } }, __dirname), null);
+    const services = names((off.manifest.application![0] as never as Record<string, unknown>).service);
+    expect(services).not.toContain('expo.modules.fieldagent.NotificationBridge');
+    // Removal is surgical, not a reset.
+    expect(services).toContain('expo.modules.fieldagent.TrackingService');
+  });
+
+  it('withdraws SCHEDULE_EXACT_ALARM when exactAlarms goes back to false', () => {
+    const enabled = resolveProps({ tracking: { url: URL, exactAlarms: true } }, __dirname);
+    const on = applyManifest(emptyManifest(), enabled, null);
+    expect(names(on.manifest['uses-permission'])).toContain('android.permission.SCHEDULE_EXACT_ALARM');
+
+    const off = applyManifest(on, resolveProps({ tracking: { url: URL } }, __dirname), null);
+    const remaining = names(off.manifest['uses-permission']);
+    expect(remaining).not.toContain('android.permission.SCHEDULE_EXACT_ALARM');
+    expect(remaining).toContain('android.permission.ACCESS_FINE_LOCATION');
   });
 });

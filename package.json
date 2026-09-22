@@ -1,6 +1,6 @@
 {
   "name": "expo-field-agent",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Suivi GPS en arriere-plan resilient, bulle flottante et alerte plein ecran pour applications Expo. Android complet, iOS avec capacites reduites assumees.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -53,12 +53,13 @@
     "react-native": "*"
   },
   "devDependencies": {
-    "@types/react": "~18.3.12",
-    "expo": "^52.0.0",
-    "expo-module-scripts": "^4.0.4",
-    "react": "18.3.1",
-    "react-native": "0.76.5",
-    "typescript": "^5.3.3"
+    "@types/react": "~19.2.0",
+    "babel-preset-expo": "^57.0.12",
+    "expo": "^57.0.24",
+    "expo-module-scripts": "^56.0.3",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "typescript": "^5.9.3"
   },
   "author": "Riadh Farhati (https://github.com/riadhriadh)",
   "homepage": "https://github.com/riadhriadh/expo-field-agent#readme",

@@ -64,7 +64,11 @@ if (!FieldAgent.isAvailable) {
 | `start()`، `stop()`، `setAuthHeader()`، `setInterval()`، `openSettings()` | تُحَلّ ولا تفعل شيئًا |
 | `isRunning()` | `false` |
 | `flush()` | `{ sent: 0, queued: 0 }` |
-| `getState()` | `running:false`، و`queued:0`، و`lastError` يقول السبب |
+| `getState()` | `running:false`، و`queued:0`، و`provider:'none'`، و`locationEnabled:false`، و`lastError` يقول السبب |
+| `getLog()` | `[]` |
+| `exportLog()` | `null` |
+| `getOdometer()` | `0` |
+| `clearLog()`، `resetOdometer()` | تُحَلّ ولا تفعل شيئًا |
 | `showBubble()` | `false` |
 | `triggerAlert()`، `dismissAlert()`، `setAlertSound()`، `setStrings()`، `setBubbleImage()` | تُحَلّ ولا تفعل شيئًا |
 | `getPendingAlert()` / `getPendingAlertSync()` | `null` |
@@ -195,11 +199,17 @@ npx expo install expo-field-agent
 | `tracking.batchSize` | `50` | |
 | `tracking.queueSize` | `1000` | |
 | `tracking.heartbeatSeconds` | `max(idleIntervalSeconds × 2, 120)` | أي `120` مع القيم الافتراضية |
+| `tracking.exactAlarms` | `false` | يبقى `SCHEDULE_EXACT_ALARM` خارج الـ manifest، ويكتفي المراقب بمنبّه غير دقيق — راجع قسم المنبّهات الدقيقة |
+| `tracking.maxAccuracyMeters` | `100` | فوق هذا الحدّ تكون القراءة ضجيجًا وتُسقَط قبل الطابور. الحدّ الأدنى `1` |
+| `tracking.maxSpeedMps` | `60` | فوق هذا الحدّ تكون القفزة خللًا في GPS لا رحلة، فتُسقَط النقطة الثانية. الحدّ الأدنى `1` |
+| `tracking.rejectMock` | `false` | تُحفَظ النقطة المزيّفة وتُعلَّم بـ `isMock` بدل أن تُرفَض |
 | `notification.channelName` | `"Suivi en service"` | |
 | `notification.title` | `"En service"` | |
 | `notification.body` | `"Ta position est partagee pendant tes courses."` | |
 | `notification.icon` | `null` | أيقونة التطبيق |
 | `notification.color` | `"#FF6B2C"` | |
+| `notification.resumeTitle` | `"Suivi interrompu"` | |
+| `notification.resumeBody` | `"Android a refuse de relancer le suivi. Ouvre l'application pour reprendre."` | |
 | `alert.titlePattern` | `".*"` | كل عنوان يُطلق التنبيه |
 | `alert.sound` | `null` | نغمة المنبّه في النظام |
 | `alert.channelName` | `"Nouvelles courses"` | |
@@ -220,6 +230,8 @@ npx expo install expo-field-agent
 | `ios.locationAlwaysPermission` | `"Ta position continue a etre partagee pendant tes courses, meme application fermee."` | |
 | `ios.criticalAlerts` | `false` | يحتاج تصريح Apple ليكون له أي أثر |
 | `rootComponent` | `"main"` | ما يسجّله `registerRootComponent` و expo-router |
+| `logLevel` | `"error"` | الأخطاء وحدها تُكتَب في السجلّ؛ و`off` لا يكتب شيئًا إطلاقًا |
+| `logMaxDays` | `7` | تُحذَف السطور الأقدم من ذلك عند الكتابة التالية. الحدّ الأدنى `1` |
 
 النصوص الافتراضية الظاهرة للمستخدم بالفرنسية، لأنّها لغة المشروع الذي بُني من
 أجله هذا الملحق. وهي إعداد عادي: اضبط `notification.title` و
@@ -235,7 +247,7 @@ npx expo install expo-field-agent
 > ["expo-build-properties", { "android": { "kotlinVersion": "1.9.25" } }]
 > ```
 >
-> تطبيق `example/` يتضمّنه لهذا السبب.
+> وتطبيق `example/` لا يتضمّنه: حزمته المرجعية هي SDK 57، حيث لا لزوم للتثبيت.
 
 > **‏iOS على أجهزة فيها Homebrew:** ‏CocoaPods 1.16 فوق Ruby 3.4 ينكسر إذا لم
 > تكن اللغة المحلية UTF-8 (`Unicode Normalization not appropriate for
@@ -249,6 +261,346 @@ npx expo install expo-field-agent
 `type="location"`، ومستقبِلا الإقلاع والمراقبة، ونشاط التنبيه، ونسخ صوتك إلى
 `res/raw` مع `noCompress`، و `UIBackgroundModes` ونصوص
 `NSLocation*UsageDescription` على iOS. **لا ملف أصلي تلمسه.**
+
+---
+
+## من الصفر إلى تطبيق تتبّع
+
+القسم السابق يقول ما تضعه في `app.json`. وهذا القسم يأخذك من جهاز فارغ إلى هاتف
+يُرسل مواقعه فعلًا: إنشاء المشروع، والتثبيت، والـ prebuild، وسلّم الأذونات
+بترتيبه الصحيح، و`App.tsx` كامل يعمل كما هو.
+
+الدليل مكتوب على الحزمة التي **تُطوَّر عليها** الوحدة اليوم: ‏`expo@^57.0.24`، و
+`react@19.2.3`، و`react-native@0.86.3`. ومع ذلك تبقى `peerDependencies` هي
+`"expo": ">=52.0.0"`: ‏**SDK 57 ليس شرطًا**، والمضيفون الأقدم ابتداءً من 52 ما
+زالوا مدعومين. إنّه فقط الإصدار الذي يُبنى ويُختبر عليه.
+
+### ٠. الحقيقة التي تسبق كل شيء: ‏Expo Go لا يشغّل هذه الحزمة
+
+`expo.modules.fieldagent.*` ليس ضمن الكود الأصلي الثابت الذي يحمله Expo Go، ولا
+حزمة تغيّر ذلك. أنت بحاجة إلى **development build**: تطبيق أصلي تبنيه بنفسك.
+
+وما يحدث داخل Expo Go تدهور لا انهيار: ‏`isAvailable` يساوي `false`، وكل مفاتيح
+`getPermissions()` العشرة تساوي `'unsupported'`، و`start()` و`stop()` تُحَلّ ولا
+تفعل شيئًا، و`<AlertHost>` لا يعرض شيئًا، ويُطلَق `console.warn` **واحد** عند أول
+نداء متدهور لا عند كل نداء. الجدول الكامل في قسم «‏Expo Go — تدهور، لا حجب» في
+الأعلى.
+
+**واستثناء واحد مقصود:** أخطاء الوسائط تبقى ترمي في Expo Go كما في غيره
+(`triggerAlert({})`، `setInterval(0)`، `setBubbleImage('')`)، لأنّها عيوب في
+كودك لا قيود في المنصّة.
+
+اربط واجهتك بـ `FieldAgent.isAvailable`. مفتاح ميّت أسوأ بكثير من شريط يقول
+«التتبّع غير متاح».
+
+### ١. أنشئ التطبيق
+
+```bash
+npx create-expo-app@latest my-field-app --template blank-typescript
+cd my-field-app
+```
+
+### ٢. ثبّت الوحدة
+
+```bash
+npx expo install expo-field-agent
+```
+
+الحزمة المرجعية لهذا الدليل — إصدارات هذا المستودع نفسه، وهي ما يُبنى عليه الكود
+الأصلي ويُختبر (‏`devDependencies` في الجذر، و‏`expo-status-bar` من
+`example/package.json`):
+
+```
+expo                   ^57.0.24
+react                  19.2.3
+react-native           0.86.3
+expo-status-bar        ~57.0.1
+@types/react           ~19.2.0
+typescript             ^5.9.3
+```
+
+و`expo-build-properties` **غائب عن قصد**: تثبيت Kotlin المذكور في قسم التثبيت
+أعلاه حلّ خاص بـ SDK 52، ولا شيء في هذه الحزمة المرجعية يحتاجه. لا تضف الحزمة
+إلّا إن كان لتطبيقك أنت سبب مستقلّ لها.
+
+واختياريًا، إن أردت مشغّل قائمة المطوّر وحده:
+
+```bash
+npx expo install expo-dev-client
+```
+
+ملاحظة: ‏`example/package.json` لا يسرده أصلًا رغم أنّ أمر التشغيل فيه هو
+`expo start --dev-client`؛ و`npx expo run:android` وحده ينتج بناء debug يعمل.
+
+### ٣. اضبط `app.json`
+
+هذه الكتلة الدنيا تعمل كما هي:
+
+```json
+{
+  "expo": {
+    "name": "تطبيق الميدان",
+    "slug": "my-field-app",
+    "scheme": "myfieldapp",
+    "android": { "package": "com.example.myfieldapp" },
+    "ios": { "bundleIdentifier": "com.example.myfieldapp" },
+    "plugins": [
+      [
+        "expo-field-agent",
+        {
+          "tracking": {
+            "url": "https://api.example.com/positions"
+          },
+          "notification": {
+            "title": "أثناء الخدمة",
+            "body": "تتم مشاركة موقعك أثناء عملك."
+          },
+          "ios": {
+            "locationWhenInUsePermission": "يُستعمل موقعك لإسناد المهام القريبة إليك.",
+            "locationAlwaysPermission": "تستمرّ مشاركة موقعك أثناء المهام، حتى والتطبيق مغلق."
+          }
+        }
+      ]
+    ]
+  }
+}
+```
+
+و`["expo-field-agent"]` بلا كائن خيارات إطلاقًا يُثبّت الملحق بالكامل هو أيضًا:
+كل مفتاح اختياري وله قيمة افتراضية، وجدولها كامل في قسم التثبيت أعلاه. وحده
+`tracking.url` بلا افتراضي — ضعه هنا أو مرّره بـ `start({ url })`، وبدون أحدهما
+يرمي `start()`.
+
+أمّا `notification.title` و`notification.body` وجملتا `ios.*` فموجودة في المثال
+الأدنى لسبب واحد: **النصوص الافتراضية بالفرنسية** (`"En service"`،
+`"Ta position est partagee pendant tes courses."`). اضبطها بلغتك، وإلّا قرأ
+مستخدموك الفرنسية.
+
+**ولا تنسخ `example/app.json` كما هو:** مفاتيحه كلّها من هذه الوحدة، لكنّها
+مضبوطة لحاجة المثال لا لحاجتك — `tracking.url` على `https://httpbin.org/post`، و
+`tracking.exactAlarms: true` (وهو ما يضيف `SCHEDULE_EXACT_ALARM` إلى بيانك)، و
+`logLevel: "debug"`، ومسارات `./assets/*` لملفّات علامات مولَّدة. خذ منه البنية،
+لا القيم.
+
+### ٤. ‏prebuild — خطوة إلزامية لا اختيارية
+
+```bash
+npx expo prebuild --clean
+```
+
+لماذا هي إلزامية: ‏`expo-field-agent` هو **ملحق إعداد وكود أصلي معًا**، وكل ما
+يحتاجه يعيش في ملفات المشروع الأصلية التي لا وجود لها قبل أن يولّدها الـ prebuild.
+
+يحصل `android/app/src/main/AndroidManifest.xml` على:
+
+- ١٤ إذن `<uses-permission>`: ‏`INTERNET`، `ACCESS_NETWORK_STATE`،
+  `ACCESS_COARSE_LOCATION`، `ACCESS_FINE_LOCATION`، `ACCESS_BACKGROUND_LOCATION`،
+  `FOREGROUND_SERVICE`، `FOREGROUND_SERVICE_LOCATION`، `POST_NOTIFICATIONS`،
+  `SYSTEM_ALERT_WINDOW`، `USE_FULL_SCREEN_INTENT`، `ACCESS_NOTIFICATION_POLICY`،
+  `RECEIVE_BOOT_COMPLETED`، `WAKE_LOCK`، `VIBRATE` — ويُضاف
+  `SCHEDULE_EXACT_ALARM` وحده حين تضبط `tracking.exactAlarms: true`؛
+- `<service android:name="expo.modules.fieldagent.TrackingService"`
+  `android:exported="false" android:foregroundServiceType="location"`
+  `android:stopWithTask="false"/>`؛
+- المستقبِلات: ‏`BootReceiver` (‏`BOOT_COMPLETED` و`QUICKBOOT_POWERON` بصيغتيه و
+  `MY_PACKAGE_REPLACED`)، و`WatchdogReceiver`، و`AlertActionReceiver`، و
+  `ProvidersChangedReceiver` (‏`PROVIDERS_CHANGED`)؛
+- نشاط `AlertActivity` مع `showWhenLocked` و`turnScreenOn` و`excludeFromRecents`
+  و`launchMode="singleTask"` و`theme="@style/Theme.FieldAgent.Alert"`؛
+- `<meta-data android:name="expo.modules.fieldagent.CONFIG">` واحدة تحمل الإعداد
+  المحلول كلّه ككتلة JSON واحدة؛
+- صوتك `alert.sound` منسوخًا إلى `res/raw/field_agent_alert.<ext>` مع إضافة
+  `noCompress` إلى `app/build.gradle`.
+
+ويحصل `ios/<Project>/Info.plist` على `UIBackgroundModes: ["location"]`، و
+`NSLocationWhenInUseUsageDescription`، و`NSLocationAlwaysAndWhenInUseUsageDescription`،
+و`NSLocationAlwaysUsageDescription`، وقاموس `EXFieldAgent` يقرؤه الجانب Swift؛
+ويُنسَخ الصوت باسم `FieldAgentAlert.<ext>` ويُضاف إلى Copy Bundle Resources.
+
+لا شيء من هذا كلّه يمكن بلوغه من JavaScript. وهذا وحده سبب كون الوحدة أصلية.
+
+### ٥. شغّله على جهاز حقيقي
+
+```bash
+npx expo run:android          # يبني، ويثبّت، ويشغّل Metro
+```
+
+استعمل **هاتفًا فعليًا** لأي اختبار ذي معنى: المحاكي يزوّد مواقع مزيّفة (انظر
+فخاخ أوّل مرّة أدناه)، ولا يعرف Doze ولا قاتلي المهام عند المصنّعين.
+
+وعلى iOS:
+
+```bash
+npx expo run:ios
+```
+
+وعلى أجهزة فيها Homebrew وRuby 3.4 استعمل `LANG=en_US.UTF-8 npx expo run:ios` —
+الملاحظة كاملة في قسم التثبيت أعلاه.
+
+### ٦. الأذونات: المقدّمة أوّلًا، ثم الخلفية
+
+يمشي `requestPermissions()` السلّم كلّه في نداء واحد، بهذا الترتيب بالضبط،
+متجاوزًا كل ما هو ممنوح أصلًا:
+
+| # | المفتاح | ما يراه المستخدم |
+|---|---|---|
+| ١ | `location` | حوار النظام لـ `ACCESS_FINE_LOCATION` و`ACCESS_COARSE_LOCATION` |
+| ٢ | `notifications` | حوار `POST_NOTIFICATIONS` — أندرويد ١٣ فما فوق فقط |
+| ٣ | `backgroundLocation` | فقط إن كان إذن المقدّمة ممنوحًا أصلًا. أندرويد ١٠ بالضبط: حوار حقيقي. أندرويد ١١ فما فوق: صفحة **معلومات التطبيق** في الإعدادات، إذ لا حوار موجود أصلًا |
+| ٤ | `overlay` | شاشة `ACTION_MANAGE_OVERLAY_PERMISSION` |
+| ٥ | `dndAccess` | شاشة `ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS` |
+| ٦ | `fullScreenIntent` | شاشة `MANAGE_APP_USE_FULL_SCREEN_INTENT` — أندرويد ١٤ فما فوق فقط |
+| ٧ | `batteryUnrestricted` | قائمة `ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS` في النظام، لا الحوار ذا النقرة الواحدة |
+| ٨ | `autostart` | شاشة المصنّع، ثم `Power.markConfirmed()` بلا شرط |
+
+كل شاشة إعدادات تُنتظَر عبر `startActivityForResult`، لأنّ لا API تنتظر صفحة
+إعدادات: نتيجة النشاط — ولو كانت `RESULT_CANCELED` — هي وحدها ما يقول إنّ
+المستخدم رجع. ويُحَلّ `requestPermissions()` بحزمة أذونات طازجة بعد السلّم كلّه.
+
+**والجزء الذي يُخطئ فيه الجميع:** على أندرويد ١١ فما فوق **لا يمنح أي حوارٍ إذنَ
+الموقع في الخلفية**. والنداء الواحد يأخذ المستخدم من حوار المقدّمة إلى صفحة
+إعدادات لا يعرف لماذا فُتحت — وGoogle Play تشترط إفصاحًا صريحًا قبل ذلك الطلب.
+لذلك اقسم السلّم بـ `skip`، كما يفعل `App.tsx` في الخطوة التالية.
+
+وما يراه المستخدم هناك على أندرويد ١١ فما فوق هو صفحة **معلومات التطبيق**
+(`ACTION_APPLICATION_DETAILS_SETTINGS`)، لا صفحة إذن الموقع مباشرةً: عليه أن
+يضغط بنفسه **الأذونات ← الموقع ← السماح طوال الوقت**. ولهذا يجب أن يقول إفصاحك
+هذه الكلمات بعينها.
+
+**و`'undetermined'` ليست `'denied'`.** لا تُرجِع `runtimeState()` القيمة
+`'denied'` إلّا بعد أن تُسجَّل علامة `asked_<permission>`؛ وقبل أول طلب تكون
+`'undetermined'`. وحدها `'denied'` تعني «لا تسأل ثانية»: من يفرّع على
+`!== 'granted'` يرمي مستخدمًا جديدًا في الإعدادات بدل أن يُريه الحوار.
+
+### ٧. ‏`App.tsx` كامل
+
+```tsx
+import * as FieldAgent from 'expo-field-agent';
+import { useEffect, useState } from 'react';
+import { Button, Text, View } from 'react-native';
+
+// شاشات البقاء: لا تُطلب عند التسجيل، بل في لحظة هادئة لاحقة.
+const SURVIVAL = ['overlay', 'dndAccess', 'fullScreenIntent', 'batteryUnrestricted', 'autostart'] as const;
+
+// شاشتك أنت: نصّ بملء الشاشة يُحَلّ حين يضغط المستخدم «متابعة».
+const showDisclosure = async () => {};
+
+export default function App() {
+  const [points, setPoints] = useState(0);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    const subs = [
+      FieldAgent.addListener('position', () => setPoints((n) => n + 1)),
+      FieldAgent.addListener('error', (e) => console.warn(e.code, e.message)),
+    ];
+    return () => subs.forEach((s) => s.remove());
+  }, []);
+
+  async function goOnDuty() {
+    if (!FieldAgent.isAvailable) return;   // Expo Go: قُلها في الواجهة، لا تتظاهر
+
+    // ١ — المقدّمة وحدها: حوار الموقع، ثم حوار الإشعارات على أندرويد ١٣ فما فوق.
+    let perms = await FieldAgent.requestPermissions({ skip: ['backgroundLocation', ...SURVIVAL] });
+    if (perms.location !== 'granted') return;   // لا شيء بعدها يستحقّ السؤال
+
+    // ٢ — إفصاحك أنت، بكلماتك: «في الشاشة التالية اختر الموقع ← السماح طوال الوقت.»
+    await showDisclosure();
+
+    // ٣ — الخلفية وحدها: على أندرويد ١١ فما فوق تُفتح صفحة معلومات التطبيق،
+    //     ويُحَلّ الوعد حين يعود المستخدم منها.
+    perms = await FieldAgent.requestPermissions({ skip: ['location', 'notifications', ...SURVIVAL] });
+    if (perms.backgroundLocation !== 'granted') {
+      await FieldAgent.openSettings('backgroundLocation');   // الصفحة نفسها، اختصارًا
+    }
+
+    await FieldAgent.setAuthHeader('Bearer …');   // مشفَّر (Keystore / Keychain)
+    try {
+      await FieldAgent.start();                   // أو start({ url }) لتجاوز app.json
+      setRunning(true);
+    } catch (e) {
+      // SERVICE_START: أندرويد رفض البدء من الخلفية. اعرضه، ولا تعتبره نهائيًا —
+      // المراقب ومستقبِل الإقلاع وأوّل عودة إلى المقدّمة كلّها ستستأنف التتبّع.
+      console.warn(e);
+    }
+    await FieldAgent.showBubble();                // false على iOS، عن قصد
+  }
+
+  async function goOffDuty() {
+    await FieldAgent.stop();                      // لا يرمي أبدًا
+    await FieldAgent.hideBubble();
+    setRunning(false);
+  }
+
+  return (
+    <View style={{ padding: 24, gap: 12 }}>
+      <Text>{FieldAgent.isAvailable ? `النقاط المستلَمة: ${points}` : 'التتبّع غير متاح (Expo Go)'}</Text>
+      <Button title={running ? 'إنهاء الخدمة' : 'بدء الخدمة'} onPress={running ? goOffDuty : goOnDuty} />
+    </View>
+  );
+}
+```
+
+وشاشات البقاء تُطلب لاحقًا، في نداء رابع منفصل:
+
+```ts
+await FieldAgent.requestPermissions({ skip: ['location', 'backgroundLocation', 'notifications'] });
+```
+
+السلّم **idempotent**: ما هو ممنوح يُتجاوَز، فإعادة النداء بعد منح جزئي لا تُعيد
+سؤال المستخدم إلّا عمّا ينقص.
+
+### ٨. تحقّق أنّه يعمل فعلًا
+
+```bash
+adb shell dumpsys activity services <your.package> | grep isForeground   # المتوقّع isForeground=true
+```
+
+والوحدة **لا تكتب في logcat شيئًا** عن قصد: ‏logcat حلقة يعيد النظام تدويرها في
+دقائق، والأعطال التي تستحقّ القراءة تقع قبل ساعات من وصل الهاتف بـ adb. سجلّها
+على الجهاز نفسه: اقرأه بـ `getLog()`، وصدّره بـ `exportLog()` (وكلاهما أندرويد
+فقط)، وارفع `logLevel` فوق قيمته الافتراضية `error` في `app.json` إن أردت أكثر
+من الأخطاء.
+
+وجدول «التحقّق» أدناه فيه اثنا عشر سيناريو، كلّها قابلة للتشغيل من تطبيق
+`example/`.
+
+### فخاخ أوّل مرّة
+
+| الفخّ | ما يحدث فعلًا |
+|---|---|
+| `http://` في `tracking.url` | يعمل في بناء debug ويموت صامتًا في الإصدار: قالب Expo يضع `usesCleartextTraffic` في `src/debug` وحده، والوحدة لا تعلنه إطلاقًا. استعمل `https://`، أو أضف network security config لمضيف التطوير. و`10.0.2.2` في تطبيق `example/` هو جهازك كما يراه المحاكي، ولا يعمل إلّا لهذا السبب |
+| محاكي أندرويد و`rejectMock: true` | كل قراءة من المحاكي مزيّفة: تُرفَض كل النقاط، ويُطلَق خطأ `MOCK_LOCATION` **مرّة واحدة** ثم صمت، فيبدو التطبيق يعمل والطابور فارغ ولا شيء يُرسَل. أبقِه `false` (وهو الافتراضي) خارج الآثار التعاقدية |
+| تغيير `exactAlarms` أو `notificationBridge` بلا prebuild جديد | ‏`expo prebuild` يعيد استعمال `android/` الموجود، و**عدم كتابة** عقدة ليس مثل **حذفها**. الملحق يسحب فعليًا ما ألغيته، لكن فقط حين يعمل الـ prebuild — وإلّا بقيت تشحن ما أطفأته للتوّ |
+| `notification.icon` ليست أحادية اللون بقناة ألفا | مربّع أبيض في شريط الحالة. يتحقّق الملحق من وجود الملفّ وكونه `.png` فقط، ولا يرى ما بداخله. المطلوب PNG أحادي اللون بـ 24dp مع ألفا |
+| التتبّع يموت ليلًا | ابدأ بـ `batteryUnrestricted` و`autostart`، لا بـ GPS. ولا توجد API تُطفئ تحسين البطارية ولا قاتل المهام عند المصنّع؛ كل ما تستطيعه الوحدة فتح الشاشة الصحيحة على العلامة الصحيحة. و`autostart: 'granted'` تعني «أريناه الشاشة»، لا «الخيار مفعَّل» |
+| قيمة خاطئة في `app.json` | **لا تُفشل البناء أبدًا**: سطر `[expo-field-agent] …` على stderr ثم القيمة الافتراضية — بما في ذلك المفاتيح المجهولة (`cle inconnue "tracking.intervalSecond"…`). خطأ مطبعي مُتجاهَل بصمت لا يُميَّز عن ميزة معطوبة، فاقرأ خرج الـ prebuild |
+| `am force-stop` في الاختبار | ليس حالة اختبار: تطبيق أُوقف قسرًا لا يستقبل شيئًا إطلاقًا — لا بثًّا ولا منبّهًا ولا إقلاعًا. استعمل `am kill` أو الإزاحة من التطبيقات الحديثة |
+
+### وعلى iOS — ما يتغيّر في هذا الدليل
+
+كل ما سبق يُترجَم ويعمل على iOS، والقدرات الغائبة تُعيد قيمة صريحة (`false`،
+`"unsupported"`) لا استثناءً، فيخدم مسار كود واحد المنصّتين. لكنّ وعد هذا الدليل
+— تتبّعًا يصمد أمام كل شيء — وعدٌ أندرويديّ. وجدول الحدود الكامل أدناه؛ وهذا ما
+يتغيّر في الخطوات نفسها:
+
+| الخطوة | على iOS |
+|---|---|
+| ٤ — ‏prebuild | يكتب `UIBackgroundModes: ["location"]` وجمل `NSLocation*UsageDescription` الثلاث من `ios.locationWhenInUsePermission` و`ios.locationAlwaysPermission` — **وفقط إن لم تكن المفاتيح مضبوطة أصلًا**؛ القيمة الموجودة في إعدادك تفوز |
+| ٦ — الأذونات | ‏`requestWhenInUseAuthorization()` أوّلًا، ثم `requestAlwaysAuthorization()` **بعد منح الأولى وحدها** — السلّم نفسه بآليّة أخرى — ثم إذن الإشعارات (مع `.criticalAlert` إن فُعّل `ios.criticalAlerts`). ولكل انتظار مهلة ٦٠ ثانية، لأنّ حوار النظام قد يُغلَق دون أن تتغيّر الحالة، ونداء إذن لا يُحَلّ أبدًا هو مضيف عالق على مؤشّر تحميل |
+| ٦ — `getPermissions()` | **تسعة مفاتيح لا عشرة**: `exactAlarm` غائب تمامًا، فيقرأ `undefined` لا `'unsupported'`. أي واجهة تمرّ على قائمة العشرة الثابتة تعرض خانة فارغة هناك |
+| ٦ — `openSettings(which)` | يتجاهل وسيطه: وجهة واحدة فقط (`UIApplication.openSettingsURLString`). لا تَعِد المستخدم برابط عميق إلى مفتاح بعينه |
+| ٦ — «السماح أثناء استخدام التطبيق» | ‏`location: 'granted'` و`backgroundLocation: 'denied'` — لا `'undetermined'` |
+| ٧ — `start()` | الحارسان نفسهما (‏URL ناقصة، إذن ناقص). والتشغيل على `authorizedWhenInUse` يبدأ فعلًا ثم يُطلق `BACKGROUND_LOCATION_LOST` فورًا: لا تحديثات في الخلفية ولا مراقبة للتغيّرات الكبيرة |
+| ٧ — الإشعار الدائم «أثناء الخدمة» | **غير موجود**: لا خدمة مقدّمة ولا قناة. لا شيء يخبر المستخدم أنّه يُتتبَّع سوى مؤشّر الموقع في النظام |
+| ٧ — `showBubble()` و`setStrings()` | ‏`false`، وبلا أثر: لا فقاعة ولا قناة ولا إشعار يُعاد تسميته. وجملتا الإذن تأتيان من `Info.plist` ويقرؤهما النظام بلغة الهاتف، لا بلغة تطبيقك |
+| `setInterval(seconds)` | لا يضبط إيقاعًا: ‏iOS يسلّم عند الحركة، فيحرّك **مرشّح المسافة** بدلًا من ذلك |
+| `tracking.rejectMock` | بلا أثر: لا يكشف `CLLocation` علَمًا كهذا، ولا يُرسَل `is_mock` |
+| ٨ — الصمود | لا إعادة تشغيل بعد موت العملية ولا بعد إقلاع الهاتف. ما يبقى هو `startMonitoringSignificantLocationChanges()` أثناء `authorizedAlways` — الآلية الوحيدة القادرة على إعادة إطلاق تطبيق أُنهي — وبعد الإغلاق القسري لا شيء إطلاقًا |
+
+السطر الذي يلخّص القسم: على أندرويد هذه الوحدة **ضمان بقاء**؛ وعلى iOS **تتبّع
+خلفية بأفضل جهد** مع قائمة صريحة بما تحجبه المنصّة. عِد مستخدمي iOS بالثاني، ولا
+تَعِدهم بالأوّل أبدًا.
 
 ---
 
@@ -312,6 +664,13 @@ FieldAgent.setAuthHeader(value: string | null): Promise<void>;
 FieldAgent.setInterval(seconds: number): Promise<void>;                // أثناء التشغيل
 FieldAgent.flush(): Promise<{ sent: number; queued: number }>;
 FieldAgent.getState(): Promise<TrackingState>;
+FieldAgent.getOdometer(): Promise<number>;                             // بالأمتار، أندرويد فقط
+FieldAgent.resetOdometer(): Promise<void>;                             // أندرويد فقط
+
+// السجلّ (أندرويد فقط) ------------------------------------------------------
+FieldAgent.getLog(opts?: { limit?: number; sinceMs?: number }): Promise<LogEntry[]>;  // الأحدث أولًا
+FieldAgent.clearLog(): Promise<void>;
+FieldAgent.exportLog(): Promise<string | null>;                        // مسار الملفّ المكتوب
 
 // الفقاعة ------------------------------------------------------------------
 FieldAgent.showBubble(): Promise<boolean>;                             // false على iOS أو بدون الإذن
@@ -330,10 +689,10 @@ FieldAgent.getPendingAlert(): Promise<AlertPayload | null>;
 FieldAgent.getPendingAlertSync(): AlertPayload | null;
 
 // الأحداث ------------------------------------------------------------------
-FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', cb): Subscription;
+FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress' | 'providerChange', cb): Subscription;
 ```
 
-يحمل `Permissions` تسعة مفاتيح:
+يحمل `Permissions` عشرة مفاتيح:
 
 | المفتاح | ما هو |
 |---|---|
@@ -346,6 +705,7 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 | `fullScreenIntent` | **إضافة** — أندرويد ١٤ يضع `setFullScreenIntent` خلف إذن خاص. بدونه يتراجع تنبيه شاشة القفل بصمت إلى إشعار عادي، لذلك جُعلت الحالة ظاهرة بدل أن تُفترض. |
 | `notificationAccess` | **إضافة** — شاشة الوصول إلى الإشعارات في النظام، ولا يلزم إلّا لـ `alert.notificationBridge` الاختياري. قيمتها `unsupported` ما لم تُفعّل الجسر. |
 | `autostart` | **إضافة** — شاشة التشغيل التلقائي عند الشركة المصنّعة. لا توجد API تقرأها: `granted` بعد أن يُرسَل المستخدم إليها، و`undetermined` قبل ذلك، و`unsupported` على علامة تجارية بلا شاشة معروفة. |
+| `exactAlarm` | **إضافة** — `SCHEDULE_EXACT_ALARM`، ولا يلزم إلّا لـ `tracking.exactAlarms` الاختياري. قيمته `unsupported` ما لم تُفعّل الخيار، لأنّ الإذن بدونه ليس في الـ manifest أصلًا، وإرسال المستخدم ليمنحه لن يمنح شيئًا. وبعد التفعيل: `granted` تحت أندرويد ١٢ حيث يكون المنبّه دقيقًا بلا طلب، ثم `granted` / `denied` بحسب `canScheduleExactAlarms()`. |
 
 ### حين يختفي إذن الموقع في الخلفية أثناء الخدمة
 
@@ -364,6 +724,169 @@ FieldAgent.addListener('position' | 'sent' | 'error' | 'alert' | 'bubblePress', 
 
 مفتاحان زيادة على العقد الأصلي، لأنّ التنبيه والتتبّع بدونهما ينكسران على
 أندرويد ١٤ فما فوق وعلى MIUI/EMUI/ColorOS **دون أن يقولا شيئًا**.
+
+### المنبّهات الدقيقة — `SCHEDULE_EXACT_ALARM` وحده، وبطلب منك وحدك
+
+في أندرويد إذنان للمنبّه الدقيق، ولن يُعلن هذا الملحق سوى واحد منهما أبدًا. وهذه
+سياسة، لا سهو.
+
+`USE_EXACT_ALARM` يُمنَح عند التثبيت ولا يسأل المستخدم شيئًا، ولذلك بالضبط
+تحجزه Google Play للمنبّهات والمؤقّتات والتقاويم. وتطبيق توصيل يشحنه يرى إصداره
+مرفوضًا. لا يُعلَن هنا **أبدًا**، فُعّل الخيار أو لم يُفعَّل: الرفض نفسه، وللسبب
+نفسه، الذي يُرفَض به `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` الذي لم يطلبه هذا
+الملحق يومًا ولن يطلبه.
+
+أمّا `SCHEDULE_EXACT_ALARM` فهو الذي يمنحه المستخدم من شاشة إعدادات. ولا يدخل
+الـ manifest **إلّا** حين تضبط `tracking.exactAlarms: true`، تمامًا كما يفعل
+`alert.notificationBridge`: إذن لم يطلبه المضيف يعني مراجعة متجر لم يوقّع عليها.
+
+```json
+["expo-field-agent", { "tracking": { "exactAlarms": true } }]
+```
+
+**ما الذي يشتريه هذا الخيار فعلًا.** منبّه المراقب هو ما يوقظ العملية كل ١٥
+دقيقة تقريبًا ليتأكّد أنّ التتبّع ما زال حيًّا ويعيد تشغيل الخدمة إن لم يكن.
+ومنذ أندرويد ١٢ صار بدء خدمة مقدّمة من الخلفية ممنوعًا خارج قائمة قصيرة من
+الاستثناءات — والمنبّه غير الدقيق `setAndAllowWhileIdle` **ليس** في تلك القائمة،
+بينما الدقيق `setExactAndAllowWhileIdle` فيها. بدون الخيار يستيقظ المراقب ويحاول
+كالعادة، لكنّه يُرفَض أكثر، فتنتظر الاستعادة أوّل عودة إلى المقدّمة. ومعه تُقبل
+الاستعادة في حينها. هذا هو الفرق كلّه: ليس الدقّة، بل الإذن بالتصرّف.
+
+اطلبه كأي وصول خاص آخر:
+
+```ts
+const { exactAlarm } = await FieldAgent.getPermissions();
+if (exactAlarm === 'denied') await FieldAgent.openSettings('exactAlarm');
+```
+
+وهو قرار يُتَّخذ عند البناء. وخلافًا لمفاتيح الإيقاع، لا يُفعَّل من `start()`:
+يجب أن يكون الإذن في الـ manifest قبل شحن التطبيق، ولا شيء أثناء التشغيل يضعه
+هناك.
+
+والمسار غير الدقيق تراجُع لا `else`: يمكن سحب الإذن بين نبضتين، لذلك يُعاد قراءة
+`canScheduleExactAlarms()` عند كل تسليح، و`SecurityException` تسقط مباشرةً على
+المنبّه غير الدقيق بدل أن نخسر المراقب كلّه.
+
+### ما الذي يُعيده `getState()`
+
+```ts
+type TrackingState = {
+  running: boolean;
+  queued: number;                            // نقاط تنتظر على القرص
+  lastFixAt: number | null;                  // ميلي ثانية Unix، من القراءة نفسها
+  lastSentAt: number | null;                 // ميلي ثانية Unix لآخر إرسال مقبول
+  lastError: string | null;                  // «CODE: message» — الأخير فقط، لا تاريخ كامل
+  lastErrorAt: number | null;                // متى وقع ذلك الخطأ
+  provider: 'fused' | 'manager' | 'none';    // ما يلتقط فعلًا
+  locationEnabled: boolean;                  // مفتاح الموقع في النظام
+};
+```
+
+المفاتيح الثلاثة الأخيرة إضافات، وكلٌّ منها يجيب عن سؤال لم تكن له إجابة من
+الخارج:
+
+- **`lastErrorAt`** — خطأ بلا تاريخ لا يمكن فرزه. «الطابور ممتلئ» قبل ثلاثة
+  أيّام و«الطابور ممتلئ» قبل ثلاث ثوانٍ نصّ واحد، وواحد منهما فقط حادثة. والتحذير
+  لا يدهس هذا الزوج أبدًا؛ الخطأ الحقيقي وحده يفعل.
+- **`provider`** — `'fused'` يعني Google Play Services، و`'manager'` يعني
+  التراجع إلى `LocationManager` على جهاز لا يملكها (أجهزة Huawei الحديثة، أنظمة
+  مجرَّدة)، و`'none'` حين لا شيء يعمل. لم يكن الاثنان يومًا الشيء نفسه ولم يكن
+  شيء يقول أيّهما لديك؛ صار للإيقاع الأخشن سبب معروف.
+- **`locationEnabled`** — مفتاح النظام. قيمته `false` تفسّر غياب النقاط وحدها،
+  وهي أوّل ما يُنظر فيه قبل اتّهام الخدمة.
+
+**وعلى iOS تغيب هذه الثلاثة عن الحمولة وتقرأ `undefined`.** يُعيد متتبّع iOS
+المفاتيح الخمسة الأصلية. عاملها كخاصّة بأندرويد إلى أن يتغيّر ذلك.
+
+### `providerChange` — حين يُطفأ الموقع نفسه
+
+أندرويد فقط. سائق يسحب شريط الإعدادات ويطفئ مربّع الموقع، أو يشغّل وضع الطيران،
+يختفي من الخريطة والخدمة ما زالت تعمل وما زالت خضراء: يتوقّف المزوّد المدمج عن
+التسليم ببساطة، بلا نداء راجع وبلا استثناء. وبثّ `PROVIDERS_CHANGED` هو الإشارة
+الوحيدة الموجودة.
+
+```ts
+FieldAgent.addListener('providerChange', ({ enabled, gps, network }) => {
+  if (!enabled) showBanner('الموقع مطفأ — لا يُسجَّل شيء.');
+});
+```
+
+قيمة `enabled` هي `gps || network`؛ والعلَمان موجودان للحالة التي يختفي فيها
+مزوّد واحد فقط. وحين يُطفأ الموقع والتتبّع مطلوب، يخرج كذلك حدث `error` برمز
+**`LOCATION_OFF`**. وحين يعود، تعيد الخدمة طلب التحديثات من تلقاء نفسها — فالمزوّد
+المدمج لا يستأنف طلبًا سقط أثناء الانقطاع — فلا شيء على المضيف أن يفعله.
+
+ولا يوجد في iOS بثّ مكافئ، و**لا يُطلق هذا الحدث أبدًا**. المستمع هناك خامل، لا
+خاطئ.
+
+### السجلّ الأصلي — `getLog()` و`clearLog()` و`exportLog()`
+
+أندرويد فقط. الأعطال التي تستحقّ القراءة تقع على هاتف داخل شاحنة، قبل ساعات من
+وصله بـ adb، و logcat حلقة يعيد النظام تدويرها في دقائق. هذا السجلّ جدول SQLite
+في تخزين التطبيق نفسه، تكتبه **الخدمة**، أي أنّه يظلّ يسجّل عبر موت العملية
+وإعادة الإقلاع ويوم خدمة كامل بلا أي JavaScript في أي مكان.
+
+```ts
+const entries = await FieldAgent.getLog({ limit: 100 });
+// [{ at: 1758546185123, level: 'error', code: 'FOREGROUND', message: '…' }, …]
+
+const path = await FieldAgent.exportLog();   // ملفّ في الذاكرة المؤقّتة، الأقدم أولًا، أو null
+await FieldAgent.clearLog();
+```
+
+- الأحدث أولًا، و`limit` افتراضه `500` و`sinceMs` افتراضه `0`. ويُتحقَّق منهما قبل
+  أي شيء آخر: `limit` غير صحيح، أو أقل من ١، أو `sinceMs` سالب أو غير منتهٍ —
+  كلّها **ترمي استثناءً**، في Expo Go كما في غيره، لأنّها عيوب في كودك لا قيود
+  منصّة.
+- يكتب `exportLog()` السجلّ كلّه في `cacheDir/field-agent/log-export.txt`، سطرًا
+  لكل مدخلة، الأقدم أولًا — وهو الترتيب الذي تُقرأ به حادثة — ويُعيد المسار
+  المطلق، أو `null` إن فشلت الكتابة. والتوقيت بـ UTC وبلغة محلّية ثابتة، حتى لا
+  يسلّم هاتف مضبوط على العربية أرقامًا عربية شرقية، ولا يختم هاتف في تونس ‎+01‎
+  بجانب خطّ زمني في الخادم بـ UTC.
+- و`logLevel` هو الأرضية: `error` افتراضًا، و`off` لا يكتب شيئًا إطلاقًا. سجلّ
+  يدوّن كل قراءة هو سجلّ لا يقرأه أحد وقاعدة تكبر من تلقاء نفسها.
+- والاحتفاظ حدّان معًا: تُحذَف السطور الأقدم من `logMaxDays` عند الكتابة التالية،
+  ويُقلَّم الجدول إلى سقف صلب قدره **١٠ ٠٠٠ سطر** غير قابل للضبط. وقرص ممتلئ أو
+  قاعدة تالفة لا يُسقطان الخدمة أبدًا؛ تضيع الكتابة وحسب.
+- و**لا تدخله أي نقطة موقع**، ولا أي ترويسة مصادقة. فالتصدير يغادر الجهاز لحظة
+  يضغط أحدهم الزرّ، والموقع بيانات شخصية. ما يدخله رموز وأسباب:
+  `FOREGROUND`، `LOCATION_OFF`، `NO_FIX`، `STALE`، `OFFLINE`، `PROVIDER`.
+
+### عدّاد المسافة
+
+أندرويد فقط. أمتار تُراكَم في الجانب الأصلي منذ آخر تصفير، عبر موت العمليات
+وإعادة الإقلاع:
+
+```ts
+const metres = await FieldAgent.getOdometer();
+await FieldAgent.resetOdometer();            // في بداية الخدمة مثلًا
+```
+
+لا يحسب إلّا الخطوات بين نقاط **أبقاها** مرشّح الجودة، ويتجاهل كل خطوة أقصر من
+أسوأ الدقّتين: ضجيج GPS لدرّاجة مركونة ليلًا كان سيُحمّلها عشرات الكيلومترات حتى
+الصباح. فهو إذًا أرضية لا عدّاد فوترة — النفق أو فقد الإشارة مسافة لا يدّعي أنّه
+رآها.
+
+### جودة النقاط — الدقّة والسرعة والمواقع المزيّفة
+
+ثلاثة مفاتيح تقرّر ما يقبله المرشّح، وهي إعدادات لا ثوابت، لأنّ درّاجة في مدينة
+مكتظّة وشاحنة على طريق سريع لا تتّفقان على معنى القفزة المستحيلة:
+
+| المفتاح | الافتراضي | ما يرفضه |
+|---|---|---|
+| `tracking.maxAccuracyMeters` | `100` | قراءة تصفها المنصّة نفسها بأسوأ من ذلك: تخمين من برج اتّصال، لا موقع |
+| `tracking.maxSpeedMps` | `60` | نقطتان تفترضان سرعة أعلى — ٦٠ م/ث تساوي ٢١٦ كم/س، وفوقها قفزة GPS لا مركبة |
+| `tracking.rejectMock` | `false` | مع `true`: كل قراءة يعلّمها أندرويد بأنّها من مزوّد مزيّف |
+
+وأمران يقعان مهما كان إعدادك. صارت كل نقطة تحمل `isMock` في حدث `position` و
+`is_mock` في حمولة الإرسال، كي يحسم خادمٌ يفوتر بالكيلومتر بنفسه بدل أن يُحسم
+القرار على الهاتف. ولم تعد حواجز المعقولية تقيس الزمن المنقضي بساعة الحائط حين
+تحمل النقطتان ساعة تشغيل الجهاز: ساعة الحائط هي بالضبط ما يستطيع سائق تقديمه من
+الإعدادات ليشتري استثناء «النفق» ويمرّر قفزة مستحيلة؛ أمّا ساعة التشغيل فلا.
+
+ومع `rejectMock: true`، ترفع أوّل قراءة مزيّفة مرفوضة حدث `error` برمز
+**`MOCK_LOCATION`** — مرّة واحدة لكل تشغيل، لأنّ الاحتيال يجب أن يُرى، لكنّ فيضًا
+من السطور لا ينفع أحدًا.
 
 ### حمولة التنبيه
 
@@ -409,6 +932,8 @@ await FieldAgent.setStrings({
   dismiss: 'تجاهل',
   bubbleLabel: 'تتبّع',
   bubbleAccessibility: '%s — اضغط لفتح التطبيق',
+  resumeTitle: 'توقّف التتبّع',
+  resumeBody: 'رفض أندرويد إعادة تشغيل التتبّع. افتح التطبيق للمتابعة.',
 });
 ```
 
@@ -475,9 +1000,22 @@ await FieldAgent.setBubbleImage(null);   // العودة إلى bubble.icon
 | ملء الشاشة عند الوصول | ✅ `setFullScreenIntent` مع `CATEGORY_CALL` وقناة `IMPORTANCE_HIGH`، **و** استثناء `SYSTEM_ALERT_WINDOW` | ⚠️ لا مكافئ. إشعار `.timeSensitive` (‏`.critical` مع التصريح). كان CallKit ليعطي ملء شاشة حقيقيًا، لكنّ Apple ترفض إساءة استعماله: هذه ليست مكالمة، فلم يُستعمل. |
 | تجاوز «عدم الإزعاج» | ⚠️ `setBypassDnd(true)` فقط إذا كان `ACCESS_NOTIFICATION_POLICY` ممنوحًا **لحظة إنشاء القناة** | ⚠️ `.timeSensitive` يخترق أوضاع التركيز؛ وما بعد ذلك يحتاج Critical Alerts |
 | شاشات التشغيل التلقائي عند المصنّعين | ✅ جدول لكل علامة تجارية مع تراجع إلى صفحة معلومات التطبيق | ❌ لا ينطبق |
+| مراقب بمنبّه دقيق | ⚠️ `SCHEDULE_EXACT_ALARM` اختياريًا فقط، ولا `USE_EXACT_ALARM` أبدًا؛ وبدونه تُرفَض الاستعادة أكثر | ❌ لا ينطبق، لا `AlarmManager` ولا شيء يُعاد تشغيله أصلًا |
+| السجلّ على الجهاز (`getLog`، `clearLog`، `exportLog`) | ✅ SQLite تكتبه الخدمة، ويصمد أمام موت العملية وإعادة الإقلاع | ❌ **غير منفَّذ.** هذه الثلاث غير معلَنة على وحدة iOS إطلاقًا، فالنداء هناك **يُرفَض** بدل أن يُعيد قيمة محايدة. احتَط بـ `Platform.OS`. |
+| عدّاد المسافة (`getOdometer`، `resetOdometer`) | ✅ يُراكَم على النقاط المقبولة ويُحفَظ | ❌ **غير منفَّذ**، ويُرفَض على iOS للسبب نفسه |
+| حدث `providerChange` | ✅ مستقبِل `PROVIDERS_CHANGED`، مع خطأ `LOCATION_OFF` وإعادة طلب تلقائية عند العودة | ❌ لا بثّ مكافئ؛ ولا يُطلقه iOS أبدًا |
+| `getState().provider` و`.locationEnabled` و`.lastErrorAt` | ✅ | ❌ غائبة عن حمولة iOS: تقرأ `undefined` |
+| رفض المواقع المزيّفة (`tracking.rejectMock`) | ✅ `Location.isMock`، و`isMock` على كل نقطة | ❌ لا يكشف `CLLocation` علَمًا كهذا؛ فالمفتاح لا يفعل شيئًا ولا يُرسَل `is_mock` |
 
 الملحق **يُترجَم ويعمل على iOS في كل الحالات**. القدرات الغائبة تُعيد قيمة
 صريحة (`false`، `"unsupported"`)، لا استثناءً أبدًا.
+
+**مع استثناء واحد معلَن، منذ الإصدار 1.6.0.** الدوالّ الخمس المضافة للسجلّ
+الأصلي وعدّاد المسافة معلَنة على وحدة أندرويد وحدها. وعلى iOS ليست
+«unsupported»، بل غائبة، والنداء يُرفَض. وإلى أن تُنفَّذ أو تُبطَّن، اختبر
+`Platform.OS === 'android'` قبل نداء `getLog` أو `clearLog` أو `exportLog` أو
+`getOdometer` أو `resetOdometer`. أمّا في Expo Go، حيث لا وحدة أصلية أصلًا،
+فالقيم المحايدة في جدول التدهور تنطبق فعلًا.
 
 ---
 
@@ -492,8 +1030,11 @@ await FieldAgent.setBubbleImage(null);   // العودة إلى bubble.icon
 2. **البقاء** — `BOOT_COMPLETED` **و** `QUICKBOOT_POWERON` (بعض الأنظمة المعدّلة
    ترسل الثاني فقط)؛ ومراقب `setAndAllowWhileIdle` كل ١٥ دقيقة تقريبًا؛ وحالة
    «أثناء الخدمة» تعيش في التفضيلات لا في الذاكرة. وحين يرفض أندرويد ١٢ فما فوق
-   بدءًا من الخلفية، يكون الفشل ظاهرًا (حدث `error` برمز `SERVICE_START`) ويُنشر
-   إشعار «استئناف» — لا يُبتلَع الخطأ.
+   بدءًا من الخلفية، يكون الفشل ظاهرًا — حدث `error` برمز `SERVICE_START`، و**وعد
+   `start()` مرفوض**، وإشعار «التتبّع متوقّف» على قناته الخاصّة، يقول إنّ التتبّع
+   متوقّف لا العكس، ويمسح نفسه لحظة عودة الخدمة. و`tracking.exactAlarms` يجعل
+   استعادة المراقب أقلّ عرضةً للرفض بكثير؛ وقسم المنبّهات الدقيقة يقول ما يكلّفه
+   ذلك الإذن.
 3. **قنوات إشعارات مرقَّمة بإصدار** — القناة الموجودة لا تعيد أبدًا قراءة
    أهميّتها ولا صوتها ولا اهتزازها ولا تجاوزها لوضع عدم الإزعاج. لذلك تحمل
    المعرّفات رقم الإصدار (`fa_alert_v1`)، مع نسخة لعدم الإزعاج ونسخة صامتة؛
@@ -641,8 +1182,8 @@ Notifications.registerTaskAsync(TASK);
     "token": "<رمز الجهاز>",
     "android": { "priority": "HIGH" },
     "data": {
-      "title": "Nouvelle course",
-      "body": "3,2 km - 12 DT",
+      "title": "مهمّة جديدة",
+      "body": "٣٫٢ كم · ١٢ د.ت",
       "jobId": "1234"
     }
   }
@@ -739,6 +1280,16 @@ FCM لا منّا.
 الثلاثة (`assets/notif.png`، `assets/bulle.png`، `assets/alerte.wav`) علامات
 مولَّدة: استبدلها بملفّاتك، فالملحق لا يفعل سوى نسخها.
 
+هذه الاثنا عشر هي الجولة الوظيفية. وما لا تقيسه هو **المدّة** — الحالات الخمس
+التي يقطع فيها أندرويد الإمداد فعلًا، والتي تبدو سليمة تمامًا في الدقائق الخمس
+التي تراقبها فيها والشاشة مضاءة. ذلك الحزام منفصل: خادم استقبال بـ Node بلا أي
+اعتماديات، يسجّل `recorded_at` لكل نقطة واردة ويطبع أكبر فجوة، مع سكربت adb لكل
+سيناريو (‏Doze، و`am kill`، وخلفية مقيّدة عبر `appops`، وإعادة إقلاع، ودلو
+الاستخدام النادر). والحكم رقم واحد — **لا فجوة تتجاوز ضِعف الفاصل المضبوط** —
+والخادم يخرج برمز غير صفري عند تجاوزها، فبإمكان CI أن تتوقّف عليها. كل شيء في
+[docs/ENDURANCE.md](docs/ENDURANCE.md) و`scripts/endurance/`، بما في ذلك لماذا
+`am force-stop` حالة لا رجعة منها. وذلك المستند بالفرنسية.
+
 ---
 
 ## الاختبارات الآلية
@@ -752,15 +1303,37 @@ cd example && npx expo prebuild --platform android && cd android && ./gradlew :e
 ```
 
 - **`Geo`** — مرشّح المعقولية في JVM خالص بلا أندرويد: دقّة شاذّة، نقاط خارج
-  الترتيب، قفزات مستحيلة، استثناء النفق، ومرشّح المسافة في مواجهة النبضة.
-  ١٦ حالة.
+  الترتيب، قفزات مستحيلة، استثناء النفق، ومرشّح المسافة في مواجهة النبضة، وساعة
+  التشغيل التي لا تخدعها ساعة حائط مقدَّمة، وحكم «موقع مزيّف»، وخطوة عدّاد
+  المسافة، وحدّ قِدَم النبضة. ٣٥ حالة.
+- **`Log`** — سُلّم الخطورة، وحساب مدّة الاحتفاظ، وصيغة السطر الواحد بـ UTC، بلا
+  أندرويد إطلاقًا (١١ حالة)؛ ثم النصف الآخر فوق Robolectric: التدوير، وسقف
+  ١٠ ٠٠٠ سطر، وترتيب التصدير، وقاعدة ترفض أن تُفتَح دون أن تُسقط الخدمة. ٩ حالات.
 - **`Queue`** — الإضافة، والسقف، والحذف بالمعرّفات (بما في ذلك مع نقاط أُضيفت
   «أثناء الطيران»)، والبقاء بعد إعادة التشغيل، وملفّ بُتِر بفعل قتل العملية.
   ٩ حالات.
-- **ملحق الإعداد** — الـ manifest الناتج يحتوي فعلًا على الأذونات، وعلى الخدمة
-  `type="location"` بـ `stopWithTask=false`، وعلى مستقبِل الإقلاع بنسخه
-  quickboot، وعلى نشاط التنبيه `showWhenLocked`؛ والإدراج في `build.gradle`
-  idempotent؛ وإعداد غير صالح يُحذّر بدل أن يُسقط البناء. ١٣ حالة.
+- **`Volume` و`Images`** — صوت المنبّه أرضيةً لا سقفًا، وفكّ ترميز الفقاعة
+  «الحدود قبل البكسلات». ١٤ حالة.
+- **`LocationSource`** — اختيار fused/manager من التوفّر وحده (حالتان)، ثم
+  `ManagerSource` أمام `LocationManager` مزيّف: طلب المزوّدين معًا، وتخطّي
+  المعطّل بدل رمي استثناء، والاحتفاظ بالأحدث من آخر موقعين معروفين. ٤ حالات.
+- **`Bus`** — الخطأ يصل المستمع **و**القرص معًا، والتحذير لا يمحو آخر خطأ أبدًا،
+  والخطأ المرفوع قبل `attach()` يخرج رغم ذلك. ٦ حالات.
+- **`Config`** — المفاتيح الجديدة تُقرأ فعلًا من الـ manifest، والمضيف الصامت
+  يأخذ الافتراضات المشحونة، وسقف بصفر يُرفَع إلى واحد، والقيمة العبثية تتراجع
+  إلى «الأخطاء فقط»، وخيار `start()` يغلب الـ manifest — و`exactAlarms` عمدًا
+  ليس ممّا يشغّله خيار `start()`، لأنّ الإذن يُقرَّر عند البناء. ٨ حالات.
+- **`Watchdog`** — `exactAlarm` يقرأ `unsupported` ما لم يُفعّل المضيف الخيار،
+  والمنبّه المرفوض يُكتَب بدل أن يُرمى، وتغيّر المزوّد يحمل ما بقي مفعَّلًا،
+  وعودة الموقع لا تنهض بالخدمة إلّا إن كان أحد في الخدمة، والصمت لا يُؤرَّخ إلّا
+  بعد تجاوز الحدّ. ٨ حالات.
+- **ملحق الإعداد وسطح JS** — الـ manifest الناتج يحتوي فعلًا على الأذونات، وعلى
+  الخدمة `type="location"` بـ `stopWithTask=false`، وعلى مستقبِل الإقلاع بنسخه
+  quickboot، وعلى نشاط التنبيه `showWhenLocked`، وعلى مستقبِل
+  `PROVIDERS_CHANGED`، وعلى `SCHEDULE_EXACT_ALARM` **فقط** إذا طلبه المضيف؛
+  والإدراج في `build.gradle` idempotent؛ وكل قيمة غير صالحة تُحذّر وتتراجع إلى
+  افتراضها بدل أن تُسقط البناء؛ و Expo Go يردّ بقيمته المحايدة على كل نداء بينما
+  تبقى أخطاء الوسائط ترمي استثناءً. ٥٥ حالة.
 
 ما تبقّى يدوي، ومقبول عن وعي، وموصوف في الجدول أعلاه.
 
@@ -771,7 +1344,8 @@ cd example && npx expo prebuild --platform android && cd android && ./gradlew :e
 | `expo prebuild` (أندرويد) ← manifest، `res/raw`، `res/drawable`، `build.gradle` | ✅ |
 | `expo prebuild` (‏iOS) ← `Info.plist`، والصوت مُضاف إلى مشروع Xcode | ✅ |
 | `:expo-field-agent:compileDebugKotlin` — ‏Expo SDK 52 | ✅ صفر تحذير في مصادر الوحدة |
-| `:expo-field-agent:test` — ‏Geo و Queue | ✅ ٢٥/٢٥ |
+| `:expo-field-agent:testDebugUnitTest` — ‏Geo، Log، Queue، Volume، Images، LocationSource، Bus، Config، Watchdog | ✅ ١٠٦/١٠٦ |
+| `npm test` — ملحق الإعداد، والقيم، وتدهور Expo Go | ✅ ٥٥/٥٥ |
 | `:app:assembleDebug` — ‏APK كامل، ‏manifest مدموج | ✅ |
 | `xcodebuild -target ExpoFieldAgent` (محاكي iOS) | ✅ |
 | `npm pack` ← تثبيت في تطبيق Expo **SDK 57** جديد، ثم `expo prebuild`، ثم بناء | ✅ بلا أي تعديل يدوي |
@@ -827,9 +1401,18 @@ adb shell dumpsys batterystats --charged tn.exemple.fieldagent > battery.txt
 مطفأة، وضع Doze: لا تنطلق النبضة عند `heartbeatSeconds`، بل عند الاستيقاظ
 التالي للخدمة — أي على أبعد تقدير عند منبّه المراقب، وهو الحدّ الأدنى الذي
 يفرضه النظام على منبّهات *while-idle*، **حوالي ١٥ دقيقة**. والنزول تحت ذلك
-يتطلّب منبّهًا دقيقًا ترفضه Google Play للتطبيقات التي ليست منبّهات ولا تقاويم.
-أمّا على الطريق فالمشكلة لا تُطرح: كل قراءة GPS تُوقظ المعالج. مقيس على محاكٍ،
-لا مستنتَج.
+يتطلّب منبّهًا دقيقًا. و`tracking.exactAlarms` يفتح هذا الباب بالضبط ولا يفتح
+غيره: `SCHEDULE_EXACT_ALARM` وحده، وهو ما يمنحه المستخدم ويستطيع سحبه، ولا
+`USE_EXACT_ALARM` الممنوح عند التثبيت الذي تحجزه Google Play للمنبّهات
+والتقاويم. أمّا على الطريق فالمشكلة لا تُطرح: كل قراءة GPS تُوقظ المعالج. مقيس
+على محاكٍ، لا مستنتَج.
+
+**والنبضة تصمت بدل أن تكذب.** إعادة إرسال آخر موقع معروف بختم زمني جديد هي كل
+غرضها — لكن بعد `max(heartbeatSeconds × 4, ٥ دقائق)` محسوبةً من اللحظة التي
+قبلت فيها هذه العملية تلك القراءة، لا ترسل شيئًا وتكتب سطر `STALE` في السجلّ
+بدلًا من ذلك. هاتف فقد GPS في مرآب تحت الأرض قبل أربعين دقيقة كان ينشر مكانه
+السابق على أنّه مكانه الحالي، ومنسّقٌ يوجّه بناءً على ذلك يرسل أحدهم إلى شارع
+فارغ. الصمت هو الجواب الصادق، وفحص الطزاجة في الخادم يتكفّل بالباقي.
 
 **‏`flush()` بلا خدمة.** يعمل: الطابور والنقل يعيشان في `Outbox` لا في الخدمة،
 فـ `flush()` يدوي يُرسل حتى والتتبّع متوقّف.

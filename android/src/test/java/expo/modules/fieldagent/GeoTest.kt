@@ -7,8 +7,16 @@ import org.junit.Test
 
 class GeoTest {
 
-    private fun fix(lat: Double, lon: Double, timeMs: Long, accuracy: Double = 10.0) =
-        Geo.Fix(lat, lon, timeMs, accuracy)
+    private fun fix(
+        lat: Double,
+        lon: Double,
+        timeMs: Long,
+        accuracy: Double = 10.0,
+        elapsedNanos: Long = 0L,
+        isMock: Boolean = false
+    ) = Geo.Fix(lat, lon, timeMs, accuracy, elapsedNanos, isMock)
+
+    private fun Long.secondsAsNanos(): Long = this * 1_000_000_000L
 
     // Tunis: avenue Habib Bourguiba -> Bab Bhar, roughly 500 m apart.
     private val tunis = fix(36.7992, 10.1806, 0)
@@ -139,5 +147,121 @@ class GeoTest {
     @Test
     fun `nothing sent yet means send`() {
         assertTrue(Geo.shouldSend(null, tunis, distanceFilterMeters = 15.0, heartbeatMs = 120_000))
+    }
+
+    @Test
+    fun `a mock fix is accepted when the host did not ask to reject them`() {
+        val spoofed = fix(36.8, 10.18, 1_000, isMock = true)
+        assertEquals(Geo.Verdict.ACCEPT, Geo.judge(null, spoofed))
+    }
+
+    @Test
+    fun `a mock fix is rejected when the host asked for it`() {
+        val spoofed = fix(36.8, 10.18, 1_000, isMock = true)
+        assertEquals(Geo.Verdict.REJECT_MOCK, Geo.judge(null, spoofed, rejectMock = true))
+    }
+
+    @Test
+    fun `the mock verdict wins over an impossible coordinate`() {
+        // Ordering matters: the operator must be told the device is spoofing,
+        // not that one of the spoofed values happened to be out of range.
+        val spoofed = fix(91.0, 10.18, 1_000, isMock = true)
+        assertEquals(Geo.Verdict.REJECT_MOCK, Geo.judge(null, spoofed, rejectMock = true))
+    }
+
+    @Test
+    fun `a stricter accuracy ceiling rejects what the default accepts`() {
+        val vague = fix(36.8, 10.18, 1_000, accuracy = 50.0)
+        assertEquals(Geo.Verdict.ACCEPT, Geo.judge(null, vague))
+        assertEquals(Geo.Verdict.REJECT_ACCURACY, Geo.judge(null, vague, maxAccuracyMeters = 30.0))
+    }
+
+    @Test
+    fun `a wider speed ceiling accepts what the default rejects`() {
+        // ~654 m in 10 s is ~65 m/s: above the stock 60, below a configured 70.
+        val fast = fix(36.805079, 10.1806, 10_000)
+        assertEquals(Geo.Verdict.REJECT_JUMP, Geo.judge(tunis, fast))
+        assertEquals(Geo.Verdict.ACCEPT, Geo.judge(tunis, fast, maxSpeedMps = 70.0))
+    }
+
+    @Test
+    fun `a forward wall clock jump cannot buy the tunnel exemption`() {
+        // The whole point of the monotonic clock: "Settings > set date to next
+        // hour" used to turn any teleport into a legitimate post-tunnel fix.
+        val here = fix(36.7992, 10.1806, 0, elapsedNanos = 1L.secondsAsNanos())
+        val sfax = fix(34.7406, 10.7603, 300_000, elapsedNanos = 11L.secondsAsNanos())
+        assertEquals(Geo.Verdict.REJECT_JUMP, Geo.judge(here, sfax))
+    }
+
+    @Test
+    fun `a backward wall clock is not out of order when the monotonic clock moved forward`() {
+        // NTP correction during a shift: timeMs goes back 5 s while the device
+        // uptime kept counting. Dropping this fix would freeze the agent.
+        val here = fix(36.7992, 10.1806, 100_000, elapsedNanos = 5L.secondsAsNanos())
+        val moved = fix(36.8010, 10.1806, 95_000, elapsedNanos = 20L.secondsAsNanos())
+        assertEquals(Geo.Verdict.ACCEPT, Geo.judge(here, moved))
+    }
+
+    @Test
+    fun `an unknown elapsed realtime on either side falls back to the wall clock`() {
+        val here = fix(36.7992, 10.1806, 0, elapsedNanos = 1L.secondsAsNanos())
+        val sfax = fix(34.7406, 10.7603, 300_000, elapsedNanos = 11L.secondsAsNanos())
+        assertEquals(Geo.Verdict.ACCEPT, Geo.judge(here.copy(elapsedRealtimeNanos = 0L), sfax))
+        assertEquals(Geo.Verdict.ACCEPT, Geo.judge(here, sfax.copy(elapsedRealtimeNanos = 0L)))
+    }
+
+    @Test
+    fun `the odometer ignores the first fix`() {
+        assertEquals(0.0, Geo.odometerStep(null, tunis), 0.0001)
+    }
+
+    @Test
+    fun `the odometer ignores a step buried in the accuracy noise`() {
+        // A parked scooter must not bill kilometres overnight.
+        val jitter = fix(36.79925, 10.18063, 20_000, accuracy = 20.0)
+        assertEquals(0.0, Geo.odometerStep(tunis, jitter), 0.0001)
+    }
+
+    @Test
+    fun `the odometer ignores a fix above the accuracy ceiling`() {
+        val vague = fix(36.8010, 10.1806, 20_000, accuracy = 150.0)
+        assertEquals(0.0, Geo.odometerStep(tunis, vague), 0.0001)
+    }
+
+    @Test
+    fun `the odometer counts a real hundred metre step`() {
+        val moved = fix(36.80010, 10.1806, 20_000)
+        assertEquals(100.0, Geo.odometerStep(tunis, moved), 5.0)
+    }
+
+    @Test
+    fun `nothing has been accepted yet, so nothing is stale`() {
+        // First minutes of a shift: the heartbeat has no position to hold back,
+        // and calling that stale would silence the very first fix.
+        assertFalse(Geo.heartbeatIsStale(0L, 1_000_000L, 120_000L))
+    }
+
+    @Test
+    fun `a position exactly on the bound is still worth sending`() {
+        val bound = Geo.MIN_HEARTBEAT_STALENESS_MS
+        assertFalse(Geo.heartbeatIsStale(1_000_000L, 1_000_000L + bound, 60_000L))
+        assertTrue(Geo.heartbeatIsStale(1_000_000L, 1_000_000L + bound + 1L, 60_000L))
+    }
+
+    @Test
+    fun `a fast heartbeat does not shorten the bound below five minutes`() {
+        // 4 x 30 s is 2 min. Cutting off there would mute a rider stopped at a
+        // red light, which is exactly the case the heartbeat exists for.
+        assertFalse(Geo.heartbeatIsStale(1L, 1L + 299_000L, 30_000L))
+        assertTrue(Geo.heartbeatIsStale(1L, 1L + 301_000L, 30_000L))
+    }
+
+    @Test
+    fun `a slow heartbeat stretches the bound to four of its own periods`() {
+        // 10 min between beats: the floor would declare a position stale before
+        // the next one was even due.
+        val heartbeatMs = 600_000L
+        assertFalse(Geo.heartbeatIsStale(1L, 1L + 4 * heartbeatMs, heartbeatMs))
+        assertTrue(Geo.heartbeatIsStale(1L, 1L + 4 * heartbeatMs + 1L, heartbeatMs))
     }
 }

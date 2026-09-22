@@ -48,6 +48,29 @@ function upsert(application: LooseApplication, tag: string, node: Node): void {
   application[tag] = kept;
 }
 
+/**
+ * The other half of upsert, and the one that is easy to forget.
+ *
+ * `expo prebuild` reuses an existing android/ directory, so not adding a node is
+ * not the same as it being absent: whatever a previous run wrote is still there.
+ * Turning an optional feature back off has to actively withdraw its declaration,
+ * otherwise the host keeps shipping the very thing they just opted out of.
+ */
+function remove(application: LooseApplication, tag: string, name: string): void {
+  const current = application[tag] as Node[] | undefined;
+  if (!current) return;
+  application[tag] = current.filter((item) => item.$?.['android:name'] !== name);
+}
+
+/** Same reasoning as `remove`, for a permission a previous prebuild granted. */
+function removePermission(manifest: Manifest, name: string): void {
+  const permissions = manifest.manifest['uses-permission'];
+  if (!permissions) return;
+  manifest.manifest['uses-permission'] = permissions.filter(
+    (item) => item.$?.['android:name'] !== name
+  );
+}
+
 export function applyManifest(
   manifest: Manifest,
   props: ResolvedProps,
@@ -55,6 +78,17 @@ export function applyManifest(
 ): Manifest {
   for (const permission of PERMISSIONS) {
     AndroidConfig.Permissions.ensurePermission(manifest, permission);
+  }
+
+  // USE_EXACT_ALARM is never declared, opted in or not: Google Play reserves it
+  // for alarm and calendar apps and pulls everyone else from the store, exactly
+  // like REQUEST_IGNORE_BATTERY_OPTIMIZATIONS above. SCHEDULE_EXACT_ALARM is the
+  // one a user can grant, so it is the only one on offer — and only on demand,
+  // because a watchdog on inexact alarms is enough for a service that is alive.
+  if (props.tracking.exactAlarms) {
+    AndroidConfig.Permissions.ensurePermission(manifest, 'android.permission.SCHEDULE_EXACT_ALARM');
+  } else {
+    removePermission(manifest, 'android.permission.SCHEDULE_EXACT_ALARM');
   }
 
   const application = manifest.manifest.application?.[0] as unknown as LooseApplication | undefined;
@@ -102,6 +136,15 @@ export function applyManifest(
     $: { 'android:name': `${PKG}.AlertActionReceiver`, 'android:exported': 'false' },
   });
 
+  // PROVIDERS_CHANGED is a protected system broadcast, so exported=false costs
+  // nothing and keeps any other app from faking a location outage.
+  upsert(application, 'receiver', {
+    $: { 'android:name': `${PKG}.ProvidersChangedReceiver`, 'android:exported': 'false' },
+    'intent-filter': [
+      { action: [{ $: { 'android:name': 'android.location.PROVIDERS_CHANGED' } }] },
+    ],
+  } as unknown as Node);
+
   // Only when asked for. Declaring a notification listener the host did not
   // request would put their release through a Play review they never signed up
   // for, over a feature they are not using.
@@ -121,6 +164,8 @@ export function applyManifest(
         },
       ],
     } as unknown as Node);
+  } else {
+    remove(application, 'service', `${PKG}.NotificationBridge`);
   }
 
   upsert(application, 'activity', {

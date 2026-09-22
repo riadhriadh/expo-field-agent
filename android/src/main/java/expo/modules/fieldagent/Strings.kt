@@ -20,6 +20,8 @@ object Strings {
     const val SERVICE_CHANNEL_NAME = "serviceChannelName"
     const val SERVICE_TITLE = "serviceTitle"
     const val SERVICE_BODY = "serviceBody"
+    const val RESUME_TITLE = "resumeTitle"
+    const val RESUME_BODY = "resumeBody"
     const val ALERT_CHANNEL_NAME = "alertChannelName"
     const val ALERT_CHANNEL_NAME_SILENT = "alertChannelNameSilent"
     const val DISMISS = "dismiss"
@@ -74,6 +76,12 @@ object Strings {
 
     fun serviceBody(context: Context): String =
         override(context, SERVICE_BODY) ?: Config.get(context).notification.body
+
+    fun resumeTitle(context: Context): String =
+        override(context, RESUME_TITLE) ?: Config.get(context).notification.resumeTitle
+
+    fun resumeBody(context: Context): String =
+        override(context, RESUME_BODY) ?: Config.get(context).notification.resumeBody
 
     fun alertChannelName(context: Context): String =
         override(context, ALERT_CHANNEL_NAME) ?: Config.get(context).alert.channelName

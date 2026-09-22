@@ -26,6 +26,9 @@ const PERMISSION_ORDER: FieldAgent.PermissionName[] = [
   'dndAccess',
   'batteryUnrestricted',
   'autostart',
+  // 'unsupported' tant que tracking.exactAlarms n'est pas a true dans app.json :
+  // sans cet opt-in la permission n'est meme pas dans le manifeste.
+  'exactAlarm',
 ];
 
 /**
@@ -38,6 +41,8 @@ export default function App() {
   const [log, setLog] = useState<string[]>([]);
   const [sound, setSound] = useState(true);
   const [fast, setFast] = useState(false);
+  const [nativeLog, setNativeLog] = useState<FieldAgent.LogEntry[]>([]);
+  const [odometer, setOdometer] = useState(0);
   const positions = useRef(0);
 
   const append = useCallback((line: string) => {
@@ -47,6 +52,7 @@ export default function App() {
   const refresh = useCallback(async () => {
     setPermissions(await FieldAgent.getPermissions());
     setState(await FieldAgent.getState());
+    setOdometer(await FieldAgent.getOdometer());
   }, []);
 
   useEffect(() => {
@@ -54,12 +60,20 @@ export default function App() {
       FieldAgent.addListener('position', (p) => {
         positions.current += 1;
         // Coordinates are personal data: the demo shows a count, not a track.
-        append(`position #${positions.current} (±${Math.round(p.accuracy)} m${p.heartbeat ? ', battement' : ''})`);
+        append(
+          `position #${positions.current} (±${Math.round(p.accuracy)} m` +
+            `${p.heartbeat ? ', battement' : ''}${p.isMock ? ', SIMULEE' : ''})`
+        );
       }),
       FieldAgent.addListener('sent', (r) => append(`envoye ${r.count}, reste ${r.queued}`)),
       FieldAgent.addListener('error', (e) => append(`erreur ${e.code} — ${e.message}`)),
       FieldAgent.addListener('alert', (a) => append(`alerte "${a.title}"`)),
       FieldAgent.addListener('bubblePress', () => append('bulle touchee')),
+      // Localisation coupee depuis le volet, ou mode avion. Rien d'autre ne le
+      // signale : Fused cesse simplement de livrer, sans erreur.
+      FieldAgent.addListener('providerChange', (p) =>
+        append(`providers : ${p.enabled ? 'actifs' : 'COUPES'} (gps ${p.gps}, reseau ${p.network})`)
+      ),
     ];
     void refresh();
     const timer = setInterval(refresh, 3000);
@@ -121,6 +135,9 @@ export default function App() {
           <Line label="lastFixAt" value={format(state?.lastFixAt)} />
           <Line label="lastSentAt" value={format(state?.lastSentAt)} />
           <Line label="lastError" value={state?.lastError ?? '—'} />
+          <Line label="lastErrorAt" value={format(state?.lastErrorAt)} />
+          <Line label="provider" value={state?.provider ?? '—'} />
+          <Line label="locationEnabled" value={String(state?.locationEnabled ?? false)} />
 
           <Button label="start()" onPress={run('start', () => FieldAgent.start())} />
           {/* 10.0.2.2 = la machine hôte vue depuis l'émulateur. Le serveur de
@@ -150,6 +167,57 @@ export default function App() {
               void run('setInterval', () => FieldAgent.setInterval(next ? 5 : 15))();
             }}
           />
+        </Section>
+
+        <Section title="Odometre">
+          <Line label="parcouru" value={`${(odometer / 1000).toFixed(2)} km`} />
+          <Button label="getOdometer()" onPress={run('getOdometer', () => FieldAgent.getOdometer())} />
+          <Button label="resetOdometer()" onPress={run('resetOdometer', () => FieldAgent.resetOdometer())} />
+          <Text style={styles.note}>
+            Cumule sur les seuls points retenus par le filtre : un vehicule a l'arret n'accumule pas
+            le bruit GPS.
+          </Text>
+        </Section>
+
+        <Section title="Diagnostics">
+          <Button
+            label="getLog() — 30 dernieres lignes"
+            onPress={async () => {
+              try {
+                setNativeLog(await FieldAgent.getLog({ limit: 30 }));
+              } catch (error) {
+                append(`getLog ✗ ${(error as Error).message}`);
+              }
+            }}
+          />
+          <Button
+            label="exportLog() — fichier partageable"
+            onPress={run('exportLog', () => FieldAgent.exportLog())}
+          />
+          <Button
+            label="clearLog()"
+            onPress={async () => {
+              await run('clearLog', () => FieldAgent.clearLog())();
+              setNativeLog([]);
+            }}
+          />
+          {/* Le point du journal natif : il survit au kill et au reboot, donc il
+              contient ce que l'evenement 'error' a rate faute de JS attache. */}
+          {nativeLog.map((entry) => (
+            <Text key={`${entry.at}-${entry.code}`} style={styles.logLine}>
+              {`${format(entry.at)}  ${entry.level.toUpperCase()}  ${entry.code}  ${entry.message}`}
+            </Text>
+          ))}
+          {nativeLog.length === 0 && (
+            <Text style={styles.note}>
+              Journal vide ou non lu. Sur iOS getLog() rend toujours [] : le journal natif est
+              Android seulement.
+            </Text>
+          )}
+          <Text style={styles.note}>
+            app.json met rejectMock a false : un emulateur fournit des positions simulees, et le
+            passer a true ferait que cet exemple ne recoit plus rien.
+          </Text>
         </Section>
 
         <Section title="Bulle">

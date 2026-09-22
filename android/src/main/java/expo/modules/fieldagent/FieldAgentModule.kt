@@ -39,13 +39,17 @@ class FieldAgentModule : Module() {
     override fun definition() = ModuleDefinition {
         Name("FieldAgent")
 
-        Events("position", "sent", "error", "alert", "bubblePress")
+        Events("position", "sent", "error", "alert", "bubblePress", "providerChange")
 
         OnCreate {
+            // Before the listener: an error raised during this very startup must
+            // already have somewhere durable to go.
+            Bus.attach(context)
             Bus.listener = { name, payload -> runCatching { this@FieldAgentModule.sendEvent(name, payload) } }
             // A process killed mid-alert would otherwise leave the user's alarm
             // volume pinned at maximum with no idea why.
             Alerts.recover(context)
+            resumeIfInterrupted()
         }
 
         OnDestroy {
@@ -92,8 +96,18 @@ class FieldAgentModule : Module() {
             // Idempotent: the persisted intention is set first so a boot or a
             // watchdog tick resumes even if this very start is refused.
             Prefs.setDesiredRunning(context, true)
-            TrackingService.request(context, "js")
+            val started = TrackingService.request(context, "js")
             Watchdog.arm(context)
+            // Android 12's refusal used to be swallowed: start() resolved as a
+            // kept promise while nothing was running, and the host had no way to
+            // know. The intention stays recorded — boot and the watchdog will
+            // resume — but the call itself now fails plainly.
+            if (!started) {
+                throw IllegalStateException(
+                    "Android a refuse de demarrer le service en arriere-plan. " +
+                        "Le suivi reprendra au prochain passage au premier plan ou au redemarrage."
+                )
+            }
         }
 
         AsyncFunction("stop") {
@@ -137,13 +151,45 @@ class FieldAgentModule : Module() {
             val lastSent = preferences.getLong(Prefs.LAST_SENT_AT, 0L)
             // A Map rather than a Bundle: the contract says these are nullable,
             // and a Bundle can only omit a key, which reads as undefined in JS.
+            val lastError = preferences.getLong(Prefs.LAST_ERROR_AT, 0L)
             mapOf(
                 "running" to TrackingService.isRunning,
                 "queued" to Outbox.size(context),
                 "lastFixAt" to if (lastFix > 0) lastFix.toDouble() else null,
                 "lastSentAt" to if (lastSent > 0) lastSent.toDouble() else null,
-                "lastError" to preferences.getString(Prefs.LAST_ERROR, null)
+                "lastError" to preferences.getString(Prefs.LAST_ERROR, null),
+                "lastErrorAt" to if (lastError > 0) lastError.toDouble() else null,
+                // Which provider is really acquiring, and whether location is even
+                // switched on: two states nothing exposed, and the first two
+                // questions worth asking in front of a silent tracker.
+                "provider" to TrackingService.activeProvider,
+                "locationEnabled" to isLocationEnabled()
             )
+        }
+
+        // --- Journal -------------------------------------------------------
+
+        AsyncFunction("getLog") { limit: Int, sinceMs: Double ->
+            Log.read(context, limit, sinceMs.toLong()).map {
+                mapOf(
+                    "at" to it.at.toDouble(),
+                    "level" to it.level.name.lowercase(),
+                    "code" to it.code,
+                    "message" to it.message
+                )
+            }
+        }
+
+        AsyncFunction("clearLog") { Log.clear(context) }
+
+        AsyncFunction("exportLog") { Log.export(context)?.absolutePath }
+
+        // --- Odometre ------------------------------------------------------
+
+        AsyncFunction("getOdometer") { odometerMeters() }
+
+        AsyncFunction("resetOdometer") {
+            Prefs.putLong(context, Prefs.ODOMETER_METERS, 0L)
         }
 
         // --- Bubble --------------------------------------------------------
@@ -196,6 +242,34 @@ class FieldAgentModule : Module() {
         Function("getPendingAlertSync") {
             Alerts.peek(context)?.toBundle()
         }
+    }
+
+    /**
+     * Coming back to the foreground is the only window in which Android lets a
+     * foreground service start after refusing it in the background. The module
+     * is only created there, so this is the one place a resume has any chance of
+     * succeeding — without asking the host for anything.
+     */
+    private fun resumeIfInterrupted() {
+        if (!Prefs.isDesiredRunning(context)) return
+        if (TrackingService.isRunning) return
+        TrackingService.request(context, "resume")
+    }
+
+    /** The odometer is kept in centimetres: SharedPreferences has no Double. */
+    private fun odometerMeters(): Double =
+        Prefs.of(context).getLong(Prefs.ODOMETER_METERS, 0L) / 100.0
+
+    private fun isLocationEnabled(): Boolean {
+        val manager = context.getSystemService(android.location.LocationManager::class.java) ?: return false
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                manager.isLocationEnabled
+            } else {
+                manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+                    manager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+            }
+        }.getOrDefault(false)
     }
 
     // --- Permission plumbing ----------------------------------------------
@@ -260,6 +334,10 @@ class FieldAgentModule : Module() {
                 else -> "undetermined"
             }
         )
+        // "unsupported" until the host sets tracking.exactAlarms: without the
+        // opt-in the permission is not even in the manifest, so asking for it
+        // would grant nothing.
+        putString("exactAlarm", Watchdog.exactAlarmState(context))
     }
 
     private suspend fun requestLadder(skip: Set<String>) {
@@ -333,6 +411,12 @@ class FieldAgentModule : Module() {
             "fullScreenIntent" -> fullScreenIntentSettings()
             "autostart" -> Power.manufacturerIntent(context).also { Power.markConfirmed(context) }
             "notificationAccess" -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            "exactAlarm" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))
+                } else {
+                    Power.appDetailsIntent(context)
+                }
             else -> Power.appDetailsIntent(context)
         }
         openForResult(intent, RC_BATTERY)
