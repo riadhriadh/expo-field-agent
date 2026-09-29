@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -147,6 +148,27 @@ class TrackingService : Service() {
     private var requestedInterval = 0
     private var heartbeat: Runnable? = null
 
+    /**
+     * Ce qui fait la difference entre « le suivi survit a l'ecran verrouille » et
+     * « le suivi survit a l'ecran verrouille quand quelque chose d'autre reveille
+     * le telephone ».
+     *
+     * Un service au premier plan n'empeche pas la suspension du CPU : ecran
+     * eteint et telephone immobile, le processus gele. Le battement de coeur est
+     * cadence par un Handler, donc sur `uptimeMillis`, qui cesse d'avancer en
+     * veille profonde — il ne part plus a `heartbeatSeconds` mais au prochain
+     * reveil, soit au plus tard l'alarme du watchdog, ~15 min plus tard. Pour un
+     * serveur qui juge la fraicheur, l'agent a disparu.
+     *
+     * Un PARTIAL_WAKE_LOCK tenu pendant toute la session garde le CPU debout :
+     * le battement repart a l'heure, la file se vide tout de suite et les
+     * callbacks de position sont traites a l'arrivee. Le lock n'est pas ignore en
+     * Doze parce que l'uid porte un service au premier plan. Le prix est la
+     * batterie, et c'est exactement l'echange que fait un traceur de terrain —
+     * `tracking.wakeLock: false` le rend a qui n'en veut pas.
+     */
+    private var wakeLock: PowerManager.WakeLock? = null
+
     /** Raised once per run: mock-location fraud has to be visible, not a log flood. */
     private var mockWarned = false
 
@@ -207,6 +229,10 @@ class TrackingService : Service() {
         }
 
         if (!started) startTracking()
+        // Idempotent, et la seule reprise possible : un `acquire` refuse au
+        // demarrage ne se retentait jamais, et huit heures de garde passaient
+        // sans que rien ne le remarque.
+        if (started) acquireWakeLock()
         // Every wake-up is a chance to catch up: the Handler-driven heartbeat
         // below runs on uptimeMillis, which stops advancing in deep sleep, so a
         // motionless phone with the screen off would otherwise go quiet. This
@@ -232,6 +258,7 @@ class TrackingService : Service() {
         // Sans cette ligne, un service tue ne laisse aucune trace : c'est l'ecart
         // entre le dernier demarrage et elle qui date la panne.
         Bus.info("SERVICE", "service detruit")
+        releaseWakeLock()
         stopUpdates()
         heartbeat?.let { main.removeCallbacks(it) }
         heartbeat = null
@@ -311,7 +338,9 @@ class TrackingService : Service() {
             return
         }
         checkBackgroundLocation()
+        reportSurvivalRisks()
         started = true
+        acquireWakeLock()
         Prefs.setDesiredRunning(this, true)
         Bus.info("TRACKING", "suivi demarre (provider=$sourceName, cadence=${intervalSeconds()}s)")
         lastMovementAt = System.currentTimeMillis()
@@ -321,8 +350,82 @@ class TrackingService : Service() {
         scheduleUpload()
     }
 
+    /**
+     * Ce qui manque pour que le suivi tienne, dit au demarrage plutot que
+     * devine apres coup.
+     *
+     * Le service demarrait sans un mot dans une configuration dont on sait
+     * qu'elle sera tuee : optimisation de batterie active, autostart jamais
+     * confirme sur une ROM qui l'exige. Le suivi s'arretait deux heures plus
+     * tard et le journal ne portait qu'un `service detruit` sans cause. Une
+     * ligne par risque, une fois par run : ce n'est pas un mecanisme de plus,
+     * c'est le diagnostic qui manquait.
+     *
+     * Rien ici n'empeche le demarrage. Ce sont des reglages que seul
+     * l'utilisateur accorde, et un suivi degrade vaut mieux que pas de suivi.
+     */
+    private fun reportSurvivalRisks() {
+        if (!Power.isUnrestricted(this)) {
+            Bus.warn(
+                "BATTERY_RESTRICTED",
+                "L'optimisation de batterie est active : Android peut tuer le service a tout moment. " +
+                    "Envoie l'utilisateur sur openSettings('batteryUnrestricted')."
+            )
+        }
+        if (Power.hasManufacturerScreen(this) && !Power.isConfirmed(this)) {
+            Bus.warn(
+                "AUTOSTART_UNCONFIRMED",
+                "Le gestionnaire du constructeur n'a jamais ete autorise : sur cette ROM le service est " +
+                    "tue quelques minutes apres le verrouillage. Envoie l'utilisateur sur openSettings('autostart')."
+            )
+        }
+        // La seule panne dont on ne revient pas tout seul : depuis Android 12 un
+        // service au premier plan ne peut pas demarrer depuis l'arriere-plan
+        // sans exemption, et une alarme inexacte n'en est pas une. Sans l'une
+        // des trois ci-dessous, le watchdog ne peut que demander et se faire
+        // refuser — la reprise attend la prochaine ouverture de l'application
+        // ou le prochain redemarrage du telephone.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            !Power.isUnrestricted(this) &&
+            !Overlay.isGranted(this) &&
+            !Watchdog.canScheduleExact(this)
+        ) {
+            Bus.error(
+                "NO_RESTART_EXEMPTION",
+                "Aucune exemption de demarrage en arriere-plan (batterie, superposition ou alarme exacte) : " +
+                    "si le service est tue, le watchdog ne pourra pas le relancer."
+            )
+        }
+    }
+
+    /**
+     * Sans borne : le service possede son propre cycle de vie et relache dans
+     * `stopTracking`/`onDestroy`, et un lock meurt de toute facon avec son
+     * processus. Une borne ne ferait que rouvrir le trou qu'elle est censee
+     * couvrir, au milieu d'une garde de huit heures.
+     */
+    private fun acquireWakeLock() {
+        if (!Config.get(this).tracking.wakeLock) return
+        if (wakeLock?.isHeld == true) return
+        val power = getSystemService(PowerManager::class.java) ?: return
+        val lock = runCatching {
+            power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "expo-field-agent:tracking")
+        }.getOrNull() ?: return
+        lock.setReferenceCounted(false)
+        runCatching { lock.acquire() }
+            .onSuccess { wakeLock = lock }
+            .onFailure { Bus.error("WAKELOCK", it.message ?: "wake lock refuse") }
+    }
+
+    private fun releaseWakeLock() {
+        val lock = wakeLock ?: return
+        wakeLock = null
+        runCatching { if (lock.isHeld) lock.release() }
+    }
+
     private fun stopTracking() {
         Bus.info("TRACKING", "suivi arrete sur demande")
+        releaseWakeLock()
         Prefs.setDesiredRunning(this, false)
         Watchdog.disarm(this)
         stopUpdates()

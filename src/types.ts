@@ -66,6 +66,13 @@ export type TrackingOptions = {
   maxSpeedMps: number;
   /** Drop mock-provider fixes outright. Android only. */
   rejectMock: boolean;
+  /**
+   * Keeps the CPU awake for the whole tracking session. On by default: a
+   * foreground service does not prevent CPU suspend, and without it the
+   * heartbeat and the uploads wait for the system's next wake-up as soon as the
+   * screen goes off. Takes effect at the next `start()`. Android only.
+   */
+  wakeLock: boolean;
 };
 
 export type Position = {

@@ -49,6 +49,12 @@ object Power {
      * Per-brand candidates: these components move between skin versions, so each
      * brand gets several, tried in order, with the app details page as the
      * last resort. Never assume the first one still exists.
+     *
+     * Tout paquet ajoute ici doit l'etre aussi dans `AUTOSTART_PACKAGES`
+     * (plugin/src/withAndroidManifest.ts) : depuis Android 11, `resolveActivity`
+     * ci-dessous rend null pour un paquet absent de <queries>, et la marche
+     * manquante est invisible — l'ecran tombe simplement sur la fiche de
+     * l'application sans que rien ne le signale.
      */
     private val CANDIDATES: Map<String, List<Pair<String, String>>> = mapOf(
         "xiaomi" to listOf(

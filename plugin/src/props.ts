@@ -37,6 +37,14 @@ export type TrackingProps = {
   maxSpeedMps?: number;
   /** Drops fixes flagged as mock. Only worth it when the trace is contractual. */
   rejectMock?: boolean;
+  /**
+   * Tient un PARTIAL_WAKE_LOCK pendant toute la session de suivi. Actif par
+   * defaut : un service au premier plan n'empeche pas la suspension du CPU, et
+   * sans lui le battement de coeur et les envois attendent le prochain reveil
+   * du systeme des que l'ecran s'eteint. Le rendre a false echange la regularite
+   * ecran verrouille contre de la batterie.
+   */
+  wakeLock?: boolean;
 };
 
 export type NotificationProps = {
@@ -139,6 +147,7 @@ export type ResolvedProps = {
     maxAccuracyMeters: number;
     maxSpeedMps: number;
     rejectMock: boolean;
+    wakeLock: boolean;
   };
   notification: {
     channelName: string;
@@ -343,6 +352,7 @@ const KNOWN_KEYS: Record<string, string[]> = {
     'maxAccuracyMeters',
     'maxSpeedMps',
     'rejectMock',
+    'wakeLock',
   ],
   notification: ['channelName', 'title', 'body', 'icon', 'color', 'resumeTitle', 'resumeBody'],
   alert: [
@@ -436,6 +446,7 @@ export function resolveProps(raw: FieldAgentPluginProps | undefined, projectRoot
       maxAccuracyMeters: num(tracking.maxAccuracyMeters, 100, 'tracking.maxAccuracyMeters', 1),
       maxSpeedMps: num(tracking.maxSpeedMps, 60, 'tracking.maxSpeedMps', 1),
       rejectMock: bool(tracking.rejectMock, false, 'tracking.rejectMock'),
+      wakeLock: bool(tracking.wakeLock, true, 'tracking.wakeLock'),
     },
     notification: {
       channelName: str(notification.channelName, 'Suivi en service', 'notification.channelName'),

@@ -1,7 +1,7 @@
 import { AndroidConfig } from 'expo/config-plugins';
 
 import { META_CONFIG, resolveProps, serializeForNative } from '../props';
-import { applyManifest } from '../withAndroidManifest';
+import { applyManifest, AUTOSTART_PACKAGES } from '../withAndroidManifest';
 
 type Manifest = AndroidConfig.Manifest.AndroidManifest;
 
@@ -25,6 +25,34 @@ describe('applyManifest', () => {
   const props = resolveProps({ tracking: { url: 'https://api.exemple.tn/api/positions' } }, __dirname);
   const manifest = applyManifest(emptyManifest(), props, null);
   const application = manifest.manifest.application![0] as unknown as Record<string, unknown>;
+
+  it('declares the OEM battery packages in <queries>', () => {
+    // Sans <queries>, Android 11 rend resolveActivity() nul sur ces paquets et
+    // l'ecran d'autostart — le seul qui empeche MIUI/EMUI de tuer le service
+    // quand l'ecran s'eteint — n'est jamais propose.
+    const queries = (manifest.manifest as unknown as Record<string, unknown>).queries as {
+      package?: { $: Record<string, string> }[];
+    }[];
+    const declared = names(queries[0].package);
+    for (const pkg of AUTOSTART_PACKAGES) {
+      expect(declared).toContain(pkg);
+    }
+  });
+
+  it('merges into an existing <queries> instead of overwriting it', () => {
+    const base = emptyManifest();
+    (base.manifest as unknown as Record<string, unknown>).queries = [
+      { package: [{ $: { 'android:name': 'tn.autre.plugin' } }] },
+    ];
+    const merged = applyManifest(base, props, null);
+    const queries = (merged.manifest as unknown as Record<string, unknown>).queries as {
+      package?: { $: Record<string, string> }[];
+    }[];
+    const declared = names(queries[0].package);
+    expect(declared).toContain('tn.autre.plugin');
+    expect(declared).toContain('com.miui.securitycenter');
+    expect(declared.filter((n) => n === 'com.miui.securitycenter')).toHaveLength(1);
+  });
 
   it('declares every permission the runtime asks for', () => {
     const declared = names(manifest.manifest['uses-permission']);

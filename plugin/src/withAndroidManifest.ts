@@ -41,6 +41,53 @@ export const PERMISSIONS = [
   'android.permission.VIBRATE',
 ];
 
+/**
+ * Les paquets « gestionnaire de batterie » des constructeurs, miroir exact de
+ * `Power.CANDIDATES` cote Kotlin.
+ *
+ * Sans cette liste dans <queries>, le filtrage de visibilite des paquets
+ * d'Android 11 rend `resolveActivity()` nul pour chacun d'eux : `Power` ne
+ * trouve jamais l'ecran d'autostart, `hasManufacturerScreen()` rend false et
+ * `getPermissions().autostart` annonce "unsupported". Sur MIUI, EMUI, ColorOS
+ * et FunTouch — exactement les ROMs qui tuent le service quand l'ecran
+ * s'eteint — le seul levier efficace n'etait donc jamais propose.
+ */
+export const AUTOSTART_PACKAGES = [
+  'com.miui.securitycenter',
+  'com.huawei.systemmanager',
+  'com.coloros.safecenter',
+  'com.oppo.safe',
+  'com.oneplus.security',
+  'com.vivo.permissionmanager',
+  'com.iqoo.secure',
+  'com.samsung.android.lool',
+  'com.samsung.android.sm_cn',
+  'com.asus.mobilemanager',
+  'com.letv.android.letvsafe',
+  'com.meizu.safe',
+  'com.transsion.phonemanager',
+  'com.evenwell.powersaving.g3',
+];
+
+/** Fusionne, jamais ecrase : d'autres plugins declarent leurs propres <queries>. */
+function ensureQueries(manifest: Manifest, packages: string[]): void {
+  const root = manifest.manifest as unknown as Record<string, unknown>;
+  const current = (root.queries as Node[] | undefined) ?? [{ $: {} } as Node];
+  const block = current[0] ?? ({ $: {} } as Node);
+  const declared = (block.package as Node[] | undefined) ?? [];
+  const known = new Set(declared.map((item) => item.$?.['android:name']));
+
+  for (const name of packages) {
+    if (known.has(name)) continue;
+    declared.push({ $: { 'android:name': name } });
+    known.add(name);
+  }
+
+  block.package = declared;
+  current[0] = block;
+  root.queries = current;
+}
+
 function upsert(application: LooseApplication, tag: string, node: Node): void {
   const current = (application[tag] as Node[] | undefined) ?? [];
   const kept = current.filter((item) => item.$?.['android:name'] !== node.$['android:name']);
@@ -90,6 +137,8 @@ export function applyManifest(
   } else {
     removePermission(manifest, 'android.permission.SCHEDULE_EXACT_ALARM');
   }
+
+  ensureQueries(manifest, AUTOSTART_PACKAGES);
 
   const application = manifest.manifest.application?.[0] as unknown as LooseApplication | undefined;
   if (!application) {

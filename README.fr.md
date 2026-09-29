@@ -562,6 +562,7 @@ prints a readable warning (`[expo-field-agent] …`) and the default applies.
 | `tracking.queueSize` | `1000` | |
 | `tracking.heartbeatSeconds` | `max(idleIntervalSeconds × 2, 120)` | Soit `120` avec les défauts · So `120` with the defaults · أي `120` مع القيم الافتراضية |
 | `tracking.exactAlarms` | `false` | `SCHEDULE_EXACT_ALARM` reste hors du manifeste, le watchdog garde une alarme inexacte · Stays out of the manifest, the watchdog keeps an inexact alarm · يبقى خارج البيان، ويحتفظ المراقب بمنبّه غير دقيق |
+| `tracking.wakeLock` | `true` | Le CPU reste debout pendant toute la session : battement et envois gardent leur cadence écran verrouillé · The CPU stays up for the whole session: heartbeat and uploads keep their cadence with the screen locked · يبقى المعالج مستيقظًا طوال الجلسة: ينتظم النبض والإرسال والشاشة مقفلة |
 | `tracking.maxAccuracyMeters` | `100` | Au-delà, le point est du bruit et n'entre pas dans la file. Minimum `1` · Above it a fix is noise. Minimum `1` · فوقها النقطة ضجيج. الحدّ الأدنى `1` |
 | `tracking.maxSpeedMps` | `60` | Au-delà, c'est un saut GPS et non un trajet. Minimum `1` · Above it the jump is a GPS artefact. Minimum `1` · فوقها قفزة GPS لا رحلة. الحدّ الأدنى `1` |
 | `tracking.rejectMock` | `false` | Le point simulé est gardé et marqué `isMock` plutôt que rejeté · Kept and flagged rather than dropped · تُحفَظ النقطة المزيّفة وتُعلَّم بدل رفضها |
@@ -1488,17 +1489,24 @@ adb shell dumpsys batterystats --charged tn.exemple.fieldagent > batterie.txt
 L'ordre de grandeur dépend entièrement de `intervalSeconds`, de la qualité du
 signal et du modèle ; un chiffre mesuré sur un Pixel ne dit rien d'un Redmi.
 
-**Le battement de cœur dégrade en veille profonde.** Il est cadencé par un
-`Handler` du fil principal, donc sur `uptimeMillis`, qui **cesse d'avancer quand
-le CPU dort**. Téléphone immobile, écran éteint, Doze : le battement ne part pas
-à `heartbeatSeconds`, il part au réveil suivant du service — c'est-à-dire au
-plus tard à l'alarme du watchdog, soit le plancher que le système impose aux
-alarmes *while-idle*, **~15 minutes**. Descendre en dessous demande une alarme
-exacte. `tracking.exactAlarms` ouvre exactement cette porte et pas une de plus :
-uniquement `SCHEDULE_EXACT_ALARM`, que l'utilisateur accorde et peut reprendre,
-jamais l'`USE_EXACT_ALARM` d'installation que Google Play réserve aux réveils et
-aux agendas. En course, le problème ne se pose pas : chaque point GPS réveille le
-CPU. Mesuré sur émulateur, pas déduit.
+**Le battement de cœur tient sur un wake lock, pas sur la chance.** Il est
+cadencé par un `Handler` du fil principal, donc sur `uptimeMillis`, qui **cesse
+d'avancer quand le CPU dort** — et un service au premier plan n'empêche pas le
+CPU de dormir. Téléphone immobile, écran éteint, Doze : sans rien, le battement
+ne partait pas à `heartbeatSeconds` mais au réveil suivant du service, c'est-à-dire
+au plus tard à l'alarme du watchdog, soit le plancher que le système impose aux
+alarmes *while-idle*, **~15 minutes**. Pour un serveur qui juge la fraîcheur,
+l'agent avait disparu. `tracking.wakeLock`, actif par défaut, tient un
+`PARTIAL_WAKE_LOCK` pendant toute la session : le CPU reste debout, le battement
+repart à l'heure et la file se vide tout de suite, écran verrouillé compris. Le
+lock n'est pas ignoré en Doze parce que l'uid porte un service au premier plan.
+Le prix est la batterie ; `tracking.wakeLock: false` le rend à qui n'en veut pas,
+et le comportement redevient celui décrit plus haut. `tracking.exactAlarms` reste
+la porte d'à côté, pour le watchdog et lui seul : uniquement
+`SCHEDULE_EXACT_ALARM`, que l'utilisateur accorde et peut reprendre, jamais
+l'`USE_EXACT_ALARM` d'installation que Google Play réserve aux réveils et aux
+agendas. En course, le problème ne se posait déjà pas : chaque point GPS réveille
+le CPU.
 
 **Le battement se tait plutôt que de mentir.** Renvoyer la dernière position
 connue sous un horodatage frais est tout son intérêt — mais passé

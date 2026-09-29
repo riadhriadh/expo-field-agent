@@ -9,6 +9,49 @@ the iOS row of the platform-limits table in the README says so in writing.
 
 ---
 
+## 1.7.0
+
+### Fixed — le suivi se dégradait dès que l'écran s'éteignait
+
+- **L'écran d'autostart constructeur n'était jamais proposé. Android** —
+  `Power` cherche l'écran « démarrage automatique » de MIUI, EMUI, ColorOS,
+  FunTouch et les autres avec `PackageManager.resolveActivity`. Depuis Android 11
+  le filtrage de visibilité des paquets rend cet appel nul pour tout paquet non
+  déclaré dans `<queries>`, et le plugin n'en déclarait aucun. Résultat :
+  `hasManufacturerScreen()` rendait toujours `false`, `manufacturerIntent()`
+  retombait toujours sur la fiche de l'application, et
+  `getPermissions().autostart` annonçait `unsupported` sur les ROMs où c'est
+  précisément le seul levier qui empêche le service d'être tué quelques minutes
+  après le verrouillage. Le plugin écrit maintenant un bloc `<queries>` avec les
+  quatorze paquets, fusionné avec celui des autres plugins plutôt qu'écrasé.
+
+- **Le battement de cœur et les envois suivaient les réveils du système, pas
+  leur cadence. Android** — un service au premier plan n'empêche pas la
+  suspension du CPU. Écran éteint, téléphone immobile, le `Handler` qui cadence
+  le battement gèle avec `uptimeMillis` : plus rien ne partait avant l'alarme du
+  watchdog, ~15 min plus tard, et un serveur qui juge la fraîcheur déclarait
+  l'agent disparu. Un `PARTIAL_WAKE_LOCK` est désormais tenu pendant toute la
+  session de suivi, relâché à l'arrêt et à la destruction du service, et
+  ré-acquis à chaque réveil du watchdog — un `acquire` refusé une fois ne se
+  retentait jamais. Nouvelle clé `tracking.wakeLock`, à `true` par défaut, pour
+  rendre l'échange à qui préfère la batterie.
+
+### Added
+
+- **Le service dit au démarrage ce qui va le tuer. Android** — il démarrait sans
+  un mot dans une configuration dont la lib sait qu'elle ne tiendra pas :
+  optimisation de batterie active, gestionnaire constructeur jamais autorisé. Le
+  suivi s'arrêtait deux heures plus tard et le journal ne portait qu'un
+  `service detruit` sans cause. `startTracking` écrit désormais une ligne par
+  risque, une fois par run : `BATTERY_RESTRICTED`, `AUTOSTART_UNCONFIRMED`, et
+  `NO_RESTART_EXEMPTION` quand ni la batterie, ni la superposition, ni l'alarme
+  exacte ne donnent l'exemption dont le watchdog a besoin pour relancer un
+  service tué sous Android 12+. Rien n'empêche le démarrage : ce sont des
+  réglages que seul l'utilisateur accorde, et un suivi dégradé vaut mieux que
+  pas de suivi.
+
+---
+
 ## 1.6.0
 
 ### Fixed — the three that shipped in 1.5.1

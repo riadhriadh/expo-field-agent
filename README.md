@@ -639,6 +639,7 @@ afternoon.
 | `tracking.queueSize` | `1000` | |
 | `tracking.heartbeatSeconds` | `max(idleIntervalSeconds × 2, 120)` | So `120` with the defaults |
 | `tracking.exactAlarms` | `false` | `SCHEDULE_EXACT_ALARM` stays out of the manifest and the watchdog uses an inexact alarm — see the exact-alarm section |
+| `tracking.wakeLock` | `true` | A `PARTIAL_WAKE_LOCK` is held for the whole tracking session. A foreground service does not prevent CPU suspend: without it the heartbeat and the uploads wait for the system's next wake-up as soon as the screen goes off. Set it to `false` to trade screen-locked regularity for battery |
 | `tracking.maxAccuracyMeters` | `100` | A fix the platform reports as worse than this is dropped before the queue. Minimum `1` |
 | `tracking.maxSpeedMps` | `60` | Two fixes implying more than this are a GPS jump, not a journey, and the second is dropped. Minimum `1` |
 | `tracking.rejectMock` | `false` | A mock fix is kept and flagged `isMock` rather than dropped |
@@ -1544,17 +1545,23 @@ adb shell dumpsys batterystats --charged tn.exemple.fieldagent > battery.txt
 The order of magnitude depends entirely on `intervalSeconds`, signal quality and
 the handset; a number measured on a Pixel says nothing about a Redmi.
 
-**The heartbeat degrades in deep sleep.** It is driven by a main-thread
-`Handler`, therefore by `uptimeMillis`, which **stops advancing when the CPU
-sleeps**. Phone motionless, screen off, Doze: the beat does not fire at
-`heartbeatSeconds`, it fires at the service's next wake-up — that is, at the
-latest at the watchdog alarm, which is the floor the system imposes on
-*while-idle* alarms, **~15 minutes**. Going below that needs an exact alarm.
-`tracking.exactAlarms` opens exactly that door and no further: only
-`SCHEDULE_EXACT_ALARM`, which the user grants and can take back, never the
-install-time `USE_EXACT_ALARM` that Google Play reserves for clocks and
-calendars. On the road the problem does not arise: every GPS fix wakes the CPU.
-Measured on an emulator, not deduced.
+**The heartbeat rides on a wake lock, not on luck.** It is driven by a
+main-thread `Handler`, therefore by `uptimeMillis`, which **stops advancing when
+the CPU sleeps** — and a foreground service does not stop the CPU from sleeping.
+Phone motionless, screen off, Doze: with nothing holding the CPU up, the beat did
+not fire at `heartbeatSeconds` but at the service's next wake-up — that is, at
+the latest at the watchdog alarm, the floor the system imposes on *while-idle*
+alarms, **~15 minutes**. To a server that judges freshness, the agent had
+vanished. `tracking.wakeLock`, on by default, holds a `PARTIAL_WAKE_LOCK` for the
+whole session: the CPU stays up, the beat fires on time and the queue drains
+immediately, screen locked included. The lock is not ignored in Doze because the
+uid carries a foreground service. The price is battery; `tracking.wakeLock: false`
+gives it back to whoever does not want it, and the behaviour reverts to the one
+described above. `tracking.exactAlarms` remains the door next to it, for the
+watchdog and nothing else: only `SCHEDULE_EXACT_ALARM`, which the user grants and
+can take back, never the install-time `USE_EXACT_ALARM` that Google Play reserves
+for clocks and calendars. On the road the problem did not arise anyway: every GPS
+fix wakes the CPU.
 
 **The heartbeat stays silent rather than lie.** Re-sending the last known
 position under a fresh timestamp is the whole point of it — but past

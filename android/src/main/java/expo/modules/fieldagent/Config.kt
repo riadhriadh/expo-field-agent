@@ -27,7 +27,13 @@ data class TrackingConfig(
      * SCHEDULE_EXACT_ALARM, which the user grants, is ever declared — and only
      * when the host asks for it.
      */
-    val exactAlarms: Boolean
+    val exactAlarms: Boolean,
+    /**
+     * Tient le CPU debout pendant toute la session. Actif par defaut : sans lui
+     * le battement de coeur et les envois se calent sur les reveils du systeme
+     * des que l'ecran s'eteint (voir TrackingService.wakeLock).
+     */
+    val wakeLock: Boolean
 )
 
 data class NotificationConfig(
@@ -167,7 +173,8 @@ object Config {
                     tracking.optDouble("maxSpeedMps", Geo.MAX_SPEED_MPS)
                 ).coerceAtLeast(1.0),
                 rejectMock = overrides.optBoolean("rejectMock", tracking.optBoolean("rejectMock", false)),
-                exactAlarms = tracking.optBoolean("exactAlarms", false)
+                exactAlarms = tracking.optBoolean("exactAlarms", false),
+                wakeLock = overrides.optBoolean("wakeLock", tracking.optBoolean("wakeLock", true))
             ),
             notification = NotificationConfig(
                 channelName = notification.str("channelName", "Suivi en service")!!,
